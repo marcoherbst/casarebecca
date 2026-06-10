@@ -38,3 +38,6 @@ yarn-error.log*
 next-env.d.ts
 /dist/
 /.wrangler/
+
+# large source BIM files downloaded for local conversion attempts
+/source-models/

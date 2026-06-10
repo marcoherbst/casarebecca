@@ -50,6 +50,7 @@ button {
 
 .viewer-shell {
   position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   height: calc(100vh - 36px);
@@ -63,7 +64,11 @@ button {
 
 .viewer-surface {
   position: relative;
+  z-index: 1;
+  contain: paint;
   min-height: 0;
+  overflow: hidden;
+  clip-path: inset(0);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.62), transparent 42%),
     #e4e9e2;
@@ -89,15 +94,20 @@ button {
 }
 
 .control-panel {
+  position: relative;
+  z-index: 10;
+  contain: paint;
+  clip-path: inset(0);
+  transform: translateZ(0);
   display: flex;
   flex-direction: column;
   gap: 18px;
   min-width: 0;
   overflow: auto;
+  overflow-x: hidden;
   padding: 22px;
   border-left: 1px solid rgba(23, 26, 22, 0.12);
-  background: rgba(251, 252, 248, 0.94);
-  backdrop-filter: blur(18px);
+  background: var(--panel);
 }
 
 .control-panel header {
@@ -133,6 +143,32 @@ button {
   gap: 10px;
   padding: 12px 0;
   border-block: 1px solid var(--line);
+}
+
+.dataset-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #eef2eb;
+}
+
+.dataset-switcher button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.dataset-switcher button[aria-pressed="true"] {
+  background: var(--panel-strong);
+  color: var(--accent-strong);
+  box-shadow: 0 3px 14px rgba(32, 42, 34, 0.08);
 }
 
 .status-strip strong {
@@ -193,6 +229,10 @@ button {
 .model-row-active {
   border-color: rgba(47, 127, 104, 0.42);
   box-shadow: 0 0 0 3px rgba(47, 127, 104, 0.1);
+}
+
+.model-row-blocked {
+  background: #fffaf5;
 }
 
 .model-row h2 {

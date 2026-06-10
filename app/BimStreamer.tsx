@@ -4,12 +4,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
+type DatasetId = "demo" | "casa";
+
 type DemoModel = {
+  dataset: DatasetId;
   description: string;
+  disabledReason?: string;
   id: string;
   name: string;
+  sourceFormat: string;
   size: string;
-  url: string;
+  url?: string;
 };
 
 type ModelState = {
@@ -37,18 +42,52 @@ type Runtime = {
 
 const MODELS: DemoModel[] = [
   {
+    dataset: "demo",
     description: "Architectural shell, rooms, walls, slabs, and openings",
     id: "school_arq",
     name: "School Architecture",
+    sourceFormat: "Fragments",
     size: "3.4 MB",
     url: "/models/school_arq.frag",
   },
   {
+    dataset: "demo",
     description: "Structural frame loaded as a separate BIM discipline",
     id: "school_str",
     name: "School Structure",
+    sourceFormat: "Fragments",
     size: "0.7 MB",
     url: "/models/school_str.frag",
+  },
+  {
+    dataset: "casa",
+    description: "Kilpoole House Project.rvt from Google Drive",
+    disabledReason:
+      "Casa Rebecca is an RVT source file. This browser stack can stream IFC-derived Fragments, so the RVT must be exported to IFC or converted with Revit/Autodesk tooling first.",
+    id: "casa_rebecca",
+    name: "Casa Rebecca",
+    sourceFormat: "RVT source",
+    size: "431 MB",
+  },
+];
+
+const DATASETS: Array<{
+  action: string;
+  description: string;
+  id: DatasetId;
+  label: string;
+}> = [
+  {
+    action: "Stream demo BIM",
+    description: "Hosted sample: ThatOpen school model",
+    id: "demo",
+    label: "Demo models",
+  },
+  {
+    action: "Load Casa Rebecca",
+    description: "RVT source: conversion needed",
+    id: "casa",
+    label: "Casa Rebecca",
   },
 ];
 
@@ -111,12 +150,24 @@ export default function BimStreamer() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
+  const [activeDatasetId, setActiveDatasetId] = useState<DatasetId>("demo");
+
+  const activeDataset = DATASETS.find(
+    (dataset) => dataset.id === activeDatasetId,
+  )!;
+
+  const currentModels = useMemo(
+    () => MODELS.filter((model) => model.dataset === activeDatasetId),
+    [activeDatasetId],
+  );
+
+  const hasStreamableModels = currentModels.some((model) => model.url);
 
   const activeCount = useMemo(
     () =>
-      Object.values(modelStates).filter((model) => model.status === "loaded")
+      currentModels.filter((model) => modelStates[model.id].status === "loaded")
         .length,
-    [modelStates],
+    [currentModels, modelStates],
   );
 
   useEffect(() => {
@@ -126,7 +177,10 @@ export default function BimStreamer() {
       if (!viewerRef.current) return;
 
       try {
-        const OBC = await import("@thatopen/components");
+        const [OBC, THREE] = await Promise.all([
+          import("@thatopen/components"),
+          import("three"),
+        ]);
         const components = new OBC.Components();
         const worlds = components.get(OBC.Worlds);
         const world = worlds.create<
@@ -137,10 +191,10 @@ export default function BimStreamer() {
 
         world.scene = new OBC.SimpleScene(components);
         world.scene.setup();
-        world.scene.three.background = null;
+        world.scene.three.background = new THREE.Color("#e4e9e2");
         world.renderer = new OBC.SimpleRenderer(components, viewerRef.current, {
           antialias: true,
-          alpha: true,
+          alpha: false,
         });
         world.renderer.showLogo = false;
         world.camera = new OBC.OrthoPerspectiveCamera(components);
@@ -209,6 +263,14 @@ export default function BimStreamer() {
   const loadModel = async (model: DemoModel) => {
     const runtime = runtimeRef.current;
     if (!runtime || modelStates[model.id].status === "streaming") return;
+    if (!model.url) {
+      setActiveModelId(model.id);
+      setModelState(model.id, {
+        error: model.disabledReason,
+        status: "error",
+      });
+      return;
+    }
 
     try {
       if (runtime.fragments.list.has(model.id)) {
@@ -272,8 +334,30 @@ export default function BimStreamer() {
     });
   };
 
+  const unloadAllModels = async () => {
+    const runtime = runtimeRef.current;
+    if (runtime) {
+      for (const model of MODELS) {
+        if (runtime.fragments.list.has(model.id)) {
+          await runtime.fragments.core.disposeModel(model.id);
+        }
+      }
+      runtime.fragments.core.update(true);
+    }
+
+    setActiveModelId(null);
+    setModelStates(initialModelState());
+  };
+
+  const switchDataset = async (dataset: DatasetId) => {
+    if (dataset === activeDatasetId) return;
+    await unloadAllModels();
+    setActiveDatasetId(dataset);
+  };
+
   const loadAll = async () => {
-    for (const model of MODELS) {
+    for (const model of currentModels) {
+      if (!model.url) continue;
       if (modelStates[model.id].status !== "loaded") {
         await loadModel(model);
       }
@@ -295,8 +379,21 @@ export default function BimStreamer() {
           <header>
             <span>ThatOpen fragments</span>
             <h1>BIM file streamer</h1>
-            <p>Hosted sample: ThatOpen school model</p>
+            <p>{activeDataset.description}</p>
           </header>
+
+          <div className="dataset-switcher" aria-label="Model set">
+            {DATASETS.map((dataset) => (
+              <button
+                aria-pressed={activeDatasetId === dataset.id}
+                key={dataset.id}
+                onClick={() => void switchDataset(dataset.id)}
+                type="button"
+              >
+                {dataset.label}
+              </button>
+            ))}
+          </div>
 
           <div className="status-strip">
             <strong>{activeCount}</strong>
@@ -305,25 +402,32 @@ export default function BimStreamer() {
 
           <button
             className="primary-action"
-            disabled={!isReady || Object.values(modelStates).some(
-              (state) => state.status === "streaming",
-            )}
+            disabled={
+              !isReady ||
+              !hasStreamableModels ||
+              Object.values(modelStates).some(
+                (state) => state.status === "streaming",
+              )
+            }
             onClick={loadAll}
             type="button"
           >
-            Stream demo BIM
+            {hasStreamableModels ? activeDataset.action : "Needs conversion"}
           </button>
 
           <div className="model-list">
-            {MODELS.map((model) => {
+            {currentModels.map((model) => {
               const state = modelStates[model.id];
               const isLoaded = state.status === "loaded";
               const isStreaming = state.status === "streaming";
               const isActive = activeModelId === model.id;
+              const isBlocked = !model.url;
 
               return (
                 <article
-                  className={`model-row ${isActive ? "model-row-active" : ""}`}
+                  className={`model-row ${isActive ? "model-row-active" : ""} ${
+                    isBlocked ? "model-row-blocked" : ""
+                  }`}
                   key={model.id}
                 >
                   <div>
@@ -333,7 +437,7 @@ export default function BimStreamer() {
 
                   <div className="model-meta">
                     <span>{model.size}</span>
-                    <span>{state.status}</span>
+                    <span>{isBlocked ? model.sourceFormat : state.status}</span>
                   </div>
 
                   <div className="progress-track">
@@ -342,20 +446,34 @@ export default function BimStreamer() {
 
                   <div className="row-footer">
                     <span>
-                      {state.bytesLoaded
+                      {isBlocked
+                        ? "RVT source not streamable"
+                        : state.bytesLoaded
                         ? `${formatBytes(state.bytesLoaded)} streamed`
                         : "Ready to stream"}
                     </span>
                     <button
-                      disabled={!isReady || isStreaming}
-                      onClick={() => (isLoaded ? unloadModel(model) : loadModel(model))}
+                      disabled={!isReady || isStreaming || isBlocked}
+                      onClick={() =>
+                        isLoaded ? unloadModel(model) : loadModel(model)
+                      }
                       type="button"
                     >
-                      {isLoaded ? "Unload" : isStreaming ? "Streaming" : "Load"}
+                      {isBlocked
+                        ? "Needs IFC"
+                        : isLoaded
+                          ? "Unload"
+                          : isStreaming
+                            ? "Streaming"
+                            : "Load"}
                     </button>
                   </div>
 
-                  {state.error ? <p className="error-text">{state.error}</p> : null}
+                  {state.error || model.disabledReason ? (
+                    <p className="error-text">
+                      {state.error ?? model.disabledReason}
+                    </p>
+                  ) : null}
                 </article>
               );
             })}
