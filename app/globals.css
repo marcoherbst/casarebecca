@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8f6f1;
+  --foreground: #171512;
+  --accent: #287162;
+  --stripe: #eb7747;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.name-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(2rem, 8vw, 5rem);
+  background:
+    linear-gradient(118deg, transparent 0 62%, rgba(40, 113, 98, 0.12) 62%),
+    linear-gradient(22deg, rgba(235, 119, 71, 0.15) 0 18%, transparent 18%),
+    var(--background);
+}
+
+.name-panel {
+  width: min(92vw, 760px);
+  text-align: center;
+}
+
+.name-panel p {
+  margin: 0 0 0.75rem;
+  color: var(--accent);
+  font-size: clamp(0.95rem, 2vw, 1.15rem);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.name-panel h1 {
+  margin: 0;
+  font-size: clamp(4rem, 18vw, 11rem);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.92;
+}
