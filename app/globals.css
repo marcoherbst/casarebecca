@@ -1,10 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8f6f1;
-  --foreground: #171512;
-  --accent: #287162;
-  --stripe: #eb7747;
+  --background: #eef1ed;
+  --foreground: #171a16;
+  --muted: #646b61;
+  --line: #d8ddd5;
+  --panel: #fbfcf8;
+  --panel-strong: #ffffff;
+  --accent: #2f7f68;
+  --accent-strong: #1f5f4c;
+  --warning: #d87948;
+  --shadow: 0 24px 70px rgba(32, 42, 34, 0.18);
 }
 
 @theme inline {
@@ -12,48 +18,273 @@
   --color-foreground: var(--foreground);
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
   min-height: 100vh;
   margin: 0;
+}
+
+body {
   background: var(--background);
   color: var(--foreground);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
 }
 
-* {
-  box-sizing: border-box;
+button {
+  font: inherit;
 }
 
-.name-page {
+.bim-app {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: clamp(2rem, 8vw, 5rem);
+  padding: 18px;
   background:
-    linear-gradient(118deg, transparent 0 62%, rgba(40, 113, 98, 0.12) 62%),
-    linear-gradient(22deg, rgba(235, 119, 71, 0.15) 0 18%, transparent 18%),
+    linear-gradient(115deg, rgba(47, 127, 104, 0.14) 0 32%, transparent 32%),
+    linear-gradient(26deg, transparent 0 76%, rgba(216, 121, 72, 0.14) 76%),
     var(--background);
 }
 
-.name-panel {
-  width: min(92vw, 760px);
-  text-align: center;
+.viewer-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  height: calc(100vh - 36px);
+  min-height: 620px;
+  overflow: hidden;
+  border: 1px solid rgba(23, 26, 22, 0.12);
+  border-radius: 8px;
+  background: #dce3dc;
+  box-shadow: var(--shadow);
 }
 
-.name-panel p {
-  margin: 0 0 0.75rem;
-  color: var(--accent);
-  font-size: clamp(0.95rem, 2vw, 1.15rem);
+.viewer-surface {
+  position: relative;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), transparent 42%),
+    #e4e9e2;
+}
+
+.viewer-surface canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.viewer-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 0.95rem;
   font-weight: 700;
+  text-transform: uppercase;
+}
+
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  overflow: auto;
+  padding: 22px;
+  border-left: 1px solid rgba(23, 26, 22, 0.12);
+  background: rgba(251, 252, 248, 0.94);
+  backdrop-filter: blur(18px);
+}
+
+.control-panel header {
+  display: grid;
+  gap: 8px;
+}
+
+.control-panel header span,
+.model-meta span {
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+  font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
 }
 
-.name-panel h1 {
+.control-panel h1 {
   margin: 0;
-  font-size: clamp(4rem, 18vw, 11rem);
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 0.92;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.control-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.status-strip {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 0;
+  border-block: 1px solid var(--line);
+}
+
+.status-strip strong {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.status-strip span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.primary-action,
+.row-footer button {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.primary-action {
+  width: 100%;
+  padding: 13px 16px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary-action:hover,
+.row-footer button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-action:disabled,
+.row-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.model-list {
+  display: grid;
+  gap: 12px;
+}
+
+.model-row {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.model-row-active {
+  border-color: rgba(47, 127, 104, 0.42);
+  box-shadow: 0 0 0 3px rgba(47, 127, 104, 0.1);
+}
+
+.model-row h2 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.model-meta,
+.row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-meta span:last-child {
+  color: var(--warning);
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e6e9e1;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #83a946);
+  transition: width 180ms ease;
+}
+
+.row-footer span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.row-footer button {
+  min-width: 86px;
+  padding: 8px 12px;
+  background: #edf2ea;
+  color: var(--accent-strong);
+}
+
+.error-text {
+  color: #a53b2b !important;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .bim-app {
+    padding: 0;
+  }
+
+  .viewer-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .viewer-surface {
+    min-height: 58vh;
+  }
+
+  .control-panel {
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid rgba(23, 26, 22, 0.12);
+  }
+}
+
+@media (max-width: 520px) {
+  .control-panel {
+    padding: 18px;
+  }
+
+  .control-panel h1 {
+    font-size: 1.6rem;
+  }
+
+  .model-meta,
+  .row-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .row-footer button {
+    width: 100%;
+  }
 }

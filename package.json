@@ -1,5 +1,5 @@
 {
-  "name": "marco-name-site",
+  "name": "casa-rebecca-bim-streamer",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -13,10 +13,15 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@thatopen/components": "^3.4.6",
+    "@thatopen/fragments": "^3.4.5",
+    "camera-controls": "^3.1.2",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "three": "^0.184.0",
+    "web-ifc": "^0.0.77"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
