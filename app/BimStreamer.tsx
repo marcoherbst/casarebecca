@@ -61,13 +61,12 @@ const MODELS: DemoModel[] = [
   },
   {
     dataset: "casa",
-    description: "Kilpoole House Project.rvt from Google Drive",
-    disabledReason:
-      "Casa Rebecca is an RVT source file. This browser stack can stream IFC-derived Fragments, so the RVT must be exported to IFC or converted with Revit/Autodesk tooling first.",
+    description: "IFC4 export converted into a streamable ThatOpen Fragment",
     id: "casa_rebecca",
     name: "Casa Rebecca",
-    sourceFormat: "RVT source",
-    size: "431 MB",
+    sourceFormat: "Fragments",
+    size: "12.4 MB",
+    url: "/models/casa_rebecca.frag",
   },
 ];
 
@@ -85,7 +84,7 @@ const DATASETS: Array<{
   },
   {
     action: "Load Casa Rebecca",
-    description: "RVT source: conversion needed",
+    description: "IFC4 export converted to Fragments",
     id: "casa",
     label: "Casa Rebecca",
   },

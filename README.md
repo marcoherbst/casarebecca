@@ -15,18 +15,18 @@ The bundled sample files come from ThatOpen's public fragment demo resources:
 
 - `school_arq.frag`
 - `school_str.frag`
+- `casa_rebecca.frag`
 
 ## Casa Rebecca Source
 
-The provided Casa Rebecca Google Drive file is `Kilpoole House Project.rvt`,
-a 431 MB Autodesk Revit project. It was downloaded locally to inspect the file
-type, but the raw RVT is intentionally ignored via `source-models/` and is not
-committed or deployed.
+The provided Casa Rebecca Google Drive file is `Kilpoole House Project.rvt`, a
+431 MB Autodesk Revit project. The RVT was downloaded locally to inspect the
+file type, but the raw RVT is intentionally ignored via `source-models/` and is
+not committed or deployed.
 
-ThatOpen's browser pipeline streams Fragment files generated from IFC data. To
-make Casa Rebecca streamable in this app, export the RVT to IFC with Revit,
-Autodesk Platform Services, or another RVT-to-IFC converter, then convert the
-IFC to `.frag`.
+The `Kilpoole House Project ifc4.ifc` export parses successfully with
+`web-ifc` and has been converted into `public/models/casa_rebecca.frag` for the
+viewer. The app streams that Fragment file from the Casa Rebecca tab.
 
 ## Commands
 
