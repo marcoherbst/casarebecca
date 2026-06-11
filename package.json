@@ -10,7 +10,7 @@
     "build": "vinext build",
     "build:vercel": "vite build --config vite.vercel.config.ts",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-vercel --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

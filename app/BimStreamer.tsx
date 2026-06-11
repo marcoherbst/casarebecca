@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
@@ -145,11 +145,12 @@ async function streamModel(
 export default function BimStreamer() {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
+  const initialLoadStartedRef = useRef(false);
   const [isReady, setIsReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
-  const [activeDatasetId, setActiveDatasetId] = useState<DatasetId>("demo");
+  const [activeDatasetId, setActiveDatasetId] = useState<DatasetId>("casa");
 
   const activeDataset = DATASETS.find(
     (dataset) => dataset.id === activeDatasetId,
@@ -249,71 +250,77 @@ export default function BimStreamer() {
     };
   }, []);
 
-  const setModelState = (id: string, update: Partial<ModelState>) => {
-    setModelStates((current) => ({
-      ...current,
-      [id]: {
-        ...current[id],
-        ...update,
-      },
-    }));
-  };
+  const setModelState = useCallback(
+    (id: string, update: Partial<ModelState>) => {
+      setModelStates((current) => ({
+        ...current,
+        [id]: {
+          ...current[id],
+          ...update,
+        },
+      }));
+    },
+    [],
+  );
 
-  const loadModel = async (model: DemoModel) => {
-    const runtime = runtimeRef.current;
-    if (!runtime || modelStates[model.id].status === "streaming") return;
-    if (!model.url) {
-      setActiveModelId(model.id);
-      setModelState(model.id, {
-        error: model.disabledReason,
-        status: "error",
-      });
-      return;
-    }
-
-    try {
-      if (runtime.fragments.list.has(model.id)) {
-        await runtime.fragments.core.disposeModel(model.id);
+  const loadModel = useCallback(
+    async (model: DemoModel) => {
+      const runtime = runtimeRef.current;
+      if (!runtime || modelStates[model.id].status === "streaming") return;
+      if (!model.url) {
+        setActiveModelId(model.id);
+        setModelState(model.id, {
+          error: model.disabledReason,
+          status: "error",
+        });
+        return;
       }
 
-      setActiveModelId(model.id);
-      setModelState(model.id, {
-        bytesLoaded: 0,
-        bytesTotal: 0,
-        error: undefined,
-        percent: 0,
-        status: "streaming",
-      });
+      try {
+        if (runtime.fragments.list.has(model.id)) {
+          await runtime.fragments.core.disposeModel(model.id);
+        }
 
-      const buffer = await streamModel(model.url, (bytesLoaded, bytesTotal) => {
+        setActiveModelId(model.id);
         setModelState(model.id, {
-          bytesLoaded,
-          bytesTotal,
-          percent: bytesTotal
-            ? Math.min(100, Math.round((bytesLoaded / bytesTotal) * 100))
-          : 0,
+          bytesLoaded: 0,
+          bytesTotal: 0,
+          error: undefined,
+          percent: 0,
+          status: "streaming",
         });
-      });
-      const streamedBytes = buffer.byteLength;
 
-      await runtime.fragments.core.load(buffer, { modelId: model.id });
-      runtime.fragments.core.update(true);
-      setModelState(model.id, {
-        bytesLoaded: streamedBytes,
-        bytesTotal: streamedBytes,
-        percent: 100,
-        status: "loaded",
-      });
-    } catch (error) {
-      setModelState(model.id, {
-        error:
-          error instanceof Error
-            ? error.message
-            : "This model could not be loaded.",
-        status: "error",
-      });
-    }
-  };
+        const buffer = await streamModel(model.url, (bytesLoaded, bytesTotal) => {
+          setModelState(model.id, {
+            bytesLoaded,
+            bytesTotal,
+            percent: bytesTotal
+              ? Math.min(100, Math.round((bytesLoaded / bytesTotal) * 100))
+              : 0,
+          });
+        });
+        const streamedBytes = buffer.byteLength;
+
+        await runtime.fragments.core.load(buffer, { modelId: model.id });
+        runtime.fragments.core.update(true);
+        setModelState(model.id, {
+          bytesLoaded: streamedBytes,
+          bytesTotal: streamedBytes,
+          percent: 100,
+          status: "loaded",
+        });
+      } catch (error) {
+        setModelState(model.id, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "This model could not be loaded.",
+          status: "error",
+        });
+      }
+    },
+    [modelStates, setModelState],
+  );
 
   const unloadModel = async (model: DemoModel) => {
     const runtime = runtimeRef.current;
@@ -354,14 +361,27 @@ export default function BimStreamer() {
     setActiveDatasetId(dataset);
   };
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     for (const model of currentModels) {
       if (!model.url) continue;
       if (modelStates[model.id].status !== "loaded") {
         await loadModel(model);
       }
     }
-  };
+  }, [currentModels, loadModel, modelStates]);
+
+  useEffect(() => {
+    if (
+      !isReady ||
+      activeDatasetId !== "casa" ||
+      initialLoadStartedRef.current
+    ) {
+      return;
+    }
+
+    initialLoadStartedRef.current = true;
+    void loadAll();
+  }, [activeDatasetId, isReady, loadAll]);
 
   return (
     <main className="bim-app">
