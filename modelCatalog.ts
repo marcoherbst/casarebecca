@@ -13,7 +13,7 @@ export const PROTECTED_MODEL_CATALOG = [
     fragmentFileName: "casa_rebecca.frag",
     id: "casa_rebecca",
     projectName: "Casa Rebecca",
-    size: "0.6 MB",
+    size: "12.4 MB",
     sourceFileName: "Casa Rebecca.ifc",
   },
   {
