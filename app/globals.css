@@ -149,7 +149,6 @@ input {
 .auth-panel span,
 .admin-panel header span,
 .signed-in-user span,
-.header-eyebrow,
 .viewer-toolbar span,
 .panel-header span,
 .sidebar-brand span,
@@ -175,7 +174,6 @@ input {
 }
 
 .google-sign-in,
-.primary-action,
 .admin-toggle,
 .sign-out-button,
 .invite-form button,
@@ -503,72 +501,15 @@ input {
 
 .dashboard-main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
-  gap: 16px;
   overflow: auto;
   padding: 18px;
 }
 
-.dashboard-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 2px;
-}
-
-.dashboard-header h1 {
-  margin: 6px 0 4px;
-  color: var(--foreground);
-  font-size: clamp(1.45rem, 1.8vw, 2rem);
-  line-height: 1.08;
-}
-
-.dashboard-header p {
-  max-width: 640px;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-.header-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.dashboard-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.icon-button {
-  display: inline-grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--card);
-  color: var(--foreground);
-  cursor: pointer;
-}
-
-.primary-action {
-  min-height: 36px;
-  padding: 0 12px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.primary-action:hover:not(:disabled),
 .row-action:hover:not(:disabled),
-.icon-button:hover:not(:disabled) {
+button.project-button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
@@ -883,18 +824,6 @@ input {
 }
 
 @media (max-width: 760px) {
-  .dashboard-header {
-    flex-direction: column;
-  }
-
-  .dashboard-actions {
-    width: 100%;
-  }
-
-  .primary-action {
-    flex: 1;
-  }
-
   .sidebar-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -930,9 +859,5 @@ input {
   .project-list,
   .auth-actions {
     grid-template-columns: 1fr;
-  }
-
-  .dashboard-header h1 {
-    font-size: 1.35rem;
   }
 }

@@ -4,12 +4,9 @@ import {
   Building2,
   CircleCheck,
   Database,
-  FolderOpen,
   Layers3,
   LayoutDashboard,
   LoaderCircle,
-  Play,
-  RotateCcw,
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
@@ -96,19 +93,16 @@ const MODELS: DemoModel[] = [
 ];
 
 const PROJECTS: Array<{
-  action: string;
   description: string;
   id: ProjectId;
   label: string;
 }> = [
   {
-    action: "Load Casa Rebecca",
     description: "IFC4 export converted to Fragments",
     id: "casa",
     label: "Casa Rebecca",
   },
   {
-    action: "Stream demo BIM",
     description: "Hosted sample: ThatOpen school model",
     id: "demo",
     label: "Demo",
@@ -200,8 +194,6 @@ export default function BimStreamer({
     () => MODELS.filter((model) => model.project === activeProjectId),
     [activeProjectId],
   );
-
-  const hasStreamableModels = currentModels.some((model) => model.url);
 
   const activeCount = useMemo(
     () =>
@@ -520,42 +512,6 @@ export default function BimStreamer({
         id="dashboard-main"
         aria-label="BIM dashboard"
       >
-        <header className="dashboard-header">
-          <div>
-            <div className="header-eyebrow">
-              <FolderOpen className="icon" aria-hidden="true" />
-              ThatOpen fragments
-            </div>
-            <h1>BIM file streamer</h1>
-          </div>
-
-          <div className="dashboard-actions">
-            <button
-              aria-label="Reset loaded models"
-              className="icon-button"
-              disabled={isStreamingAny}
-              onClick={() => void unloadAllModels()}
-              title="Reset loaded models"
-              type="button"
-            >
-              <RotateCcw className="icon" aria-hidden="true" />
-            </button>
-            <button
-              className="primary-action"
-              disabled={!isReady || !hasStreamableModels || isStreamingAny}
-              onClick={() => void loadAll()}
-              type="button"
-            >
-              {isStreamingAny ? (
-                <LoaderCircle className="icon spin" aria-hidden="true" />
-              ) : (
-                <Play className="icon" aria-hidden="true" />
-              )}
-              {hasStreamableModels ? activeProject.action : "Needs conversion"}
-            </button>
-          </div>
-        </header>
-
         <section className="project-grid">
           <section
             className="viewer-card"
