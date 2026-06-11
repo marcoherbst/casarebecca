@@ -6,28 +6,29 @@ into a browser-based 3D viewer.
 ## What It Does
 
 - Serves sample `.frag` BIM files from `public/models/`
-- Protects the Casa Rebecca `.frag` model behind a Supabase-authenticated API route
+- Protects Drive-sourced project `.frag` models behind a Supabase-authenticated API route
 - Streams each file with byte progress in the UI
 - Loads the streamed buffers into `@thatopen/components` `FragmentsManager`
 - Shows architecture and structure models as separate BIM disciplines
-- Lets you switch between the streamable demo set and Casa Rebecca
+- Lets you switch between Casa Rebecca, the other Drive projects, and the demo set
 
 The bundled sample files come from ThatOpen's public fragment demo resources:
 
 - `school_arq.frag`
 - `school_str.frag`
 
-## Casa Rebecca Source
+## Project Sources
 
-The provided Casa Rebecca Google Drive file is `Kilpoole House Project.rvt`, a
-431 MB Autodesk Revit project. The RVT was downloaded locally to inspect the
-file type, but the raw RVT is intentionally ignored via `source-models/` and is
-not committed or deployed.
+The Drive IFC folder is downloaded locally into `source-models/drive-ifc/`.
+That folder is intentionally ignored by git and is not committed or deployed.
 
-The `Kilpoole House Project ifc4.ifc` export parses successfully with
-`web-ifc` and has been converted into `protected-models/casa_rebecca.frag` for
-the viewer. Vercel serves it from `/api/models/casa_rebecca` only after
-Supabase verifies the signed-in user.
+Run `npm run convert:ifc` after adding or replacing IFC files. The converter
+uses `@thatopen/fragments` and `web-ifc` to write compressed fragments into
+`protected-models/`. Vercel serves those fragments from `/api/models/:modelId`
+only after Supabase verifies the signed-in user.
+
+The active protected project list lives in `modelCatalog.ts`. Each Drive IFC
+gets one project entry, with the IFC base filename used as the project name.
 
 ## Authentication
 
@@ -60,6 +61,7 @@ npm install
 npm run dev
 npm run build
 npm run build:vercel
+npm run convert:ifc
 npm run lint
 ```
 
@@ -68,7 +70,7 @@ npm run lint
 Vercel uses `vercel.json` to force the project framework to `Other` and build a
 static Vite version of the viewer into `dist-vercel/`. The raw conversion
 workspace in `source-models/` is excluded from Vercel uploads. The protected
-Casa Rebecca fragment is bundled only with the authenticated model API function.
+fragments are bundled only with the authenticated model API function.
 
 ## Stack
 

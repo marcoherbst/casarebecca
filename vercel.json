@@ -4,8 +4,8 @@
   "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist-vercel",
   "functions": {
-    "api/models/casa_rebecca.ts": {
-      "includeFiles": "protected-models/casa_rebecca.frag"
+    "api/models/[modelId].ts": {
+      "includeFiles": "protected-models/*.frag"
     }
   },
   "rewrites": [

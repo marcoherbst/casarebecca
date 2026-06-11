@@ -9,6 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "build:vercel": "vite build --config vite.vercel.config.ts",
+    "convert:ifc": "node scripts/convert-drive-ifcs.mjs",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern dist-vercel --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"

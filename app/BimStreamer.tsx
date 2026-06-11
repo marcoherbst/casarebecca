@@ -14,10 +14,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { PROTECTED_MODEL_CATALOG } from "../modelCatalog";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
-type ProjectId = "demo" | "casa";
+type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
 
 type DemoModel = {
   description: string;
@@ -58,7 +59,7 @@ type BimStreamerProps = {
   getAuthToken?: () => Promise<string | null>;
 };
 
-const MODELS: DemoModel[] = [
+const DEMO_MODELS: DemoModel[] = [
   {
     description: "Architectural shell, rooms, walls, slabs, and openings",
     id: "school_arq",
@@ -77,27 +78,30 @@ const MODELS: DemoModel[] = [
     size: "0.7 MB",
     url: "/models/school_str.frag",
   },
-  {
-    description: "IFC4 export converted into a streamable ThatOpen Fragment",
-    id: "casa_rebecca",
-    name: "Casa Rebecca",
-    project: "casa",
-    sourceFormat: "Fragments",
-    size: "12.4 MB",
-    url: "/api/models/casa_rebecca",
-  },
 ];
+
+const PROTECTED_MODELS: DemoModel[] = PROTECTED_MODEL_CATALOG.map((model) => ({
+  description: `${model.sourceFileName} converted to Fragments`,
+  id: model.id,
+  name: model.projectName,
+  project: model.id,
+  sourceFormat: "Fragments",
+  size: model.size,
+  url: `/api/models/${model.id}`,
+}));
+
+const MODELS: DemoModel[] = [...PROTECTED_MODELS, ...DEMO_MODELS];
 
 const PROJECTS: Array<{
   description: string;
   id: ProjectId;
   label: string;
 }> = [
-  {
-    description: "IFC4 export converted to Fragments",
-    id: "casa",
-    label: "Casa Rebecca",
-  },
+  ...PROTECTED_MODEL_CATALOG.map((model) => ({
+    description: model.description,
+    id: model.id,
+    label: model.projectName,
+  })),
   {
     description: "Hosted sample: ThatOpen school model",
     id: "demo",
@@ -168,7 +172,8 @@ export default function BimStreamer({
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
-  const [activeProjectId, setActiveProjectId] = useState<ProjectId>("casa");
+  const [activeProjectId, setActiveProjectId] =
+    useState<ProjectId>("casa_rebecca");
 
   const currentModels = useMemo(
     () => MODELS.filter((model) => model.project === activeProjectId),
@@ -423,10 +428,10 @@ export default function BimStreamer({
                 onClick={() => void switchProject(project.id)}
                 type="button"
               >
-                {project.id === "casa" ? (
-                  <Building2 className="icon" aria-hidden="true" />
-                ) : (
+                {project.id === "demo" ? (
                   <Layers3 className="icon" aria-hidden="true" />
+                ) : (
+                  <Building2 className="icon" aria-hidden="true" />
                 )}
                 <span>
                   <strong>{project.label}</strong>
