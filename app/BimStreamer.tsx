@@ -167,13 +167,17 @@ export default function BimStreamer({
 }: BimStreamerProps = {}) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
-  const autoLoadedProjectRef = useRef<ProjectId | null>(null);
+  const lastLoadRequestRef = useRef<{
+    projectId: ProjectId;
+    requestId: number;
+  } | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] =
     useState<ProjectId>("casa_rebecca");
+  const [loadRequestId, setLoadRequestId] = useState(0);
 
   const currentModels = useMemo(
     () => MODELS.filter((model) => model.project === activeProjectId),
@@ -380,10 +384,12 @@ export default function BimStreamer({
   };
 
   const switchProject = async (project: ProjectId) => {
-    if (project === activeProjectId) return;
-    await unloadAllModels();
-    autoLoadedProjectRef.current = null;
-    setActiveProjectId(project);
+    if (project !== activeProjectId) {
+      await unloadAllModels();
+      setActiveProjectId(project);
+    }
+
+    setLoadRequestId((requestId) => requestId + 1);
   };
 
   const loadAll = useCallback(async () => {
@@ -396,13 +402,43 @@ export default function BimStreamer({
   }, [currentModels, loadModel, modelStates]);
 
   useEffect(() => {
-    if (!isReady || autoLoadedProjectRef.current === activeProjectId) {
+    if (!isReady) {
       return;
     }
 
-    autoLoadedProjectRef.current = activeProjectId;
-    void loadAll();
-  }, [activeProjectId, isReady, loadAll]);
+    if (
+      lastLoadRequestRef.current?.projectId === activeProjectId &&
+      lastLoadRequestRef.current.requestId === loadRequestId
+    ) {
+      return;
+    }
+
+    const hasModelToLoad = currentModels.some((model) => {
+      const status = modelStates[model.id].status;
+      return model.url && status !== "loaded" && status !== "streaming";
+    });
+
+    if (!hasModelToLoad) {
+      return;
+    }
+
+    lastLoadRequestRef.current = {
+      projectId: activeProjectId,
+      requestId: loadRequestId,
+    };
+    const timeoutId = window.setTimeout(() => {
+      void loadAll();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    activeProjectId,
+    currentModels,
+    isReady,
+    loadAll,
+    loadRequestId,
+    modelStates,
+  ]);
 
   return (
     <main className="dashboard-app">
