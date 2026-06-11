@@ -1,13 +1,10 @@
 "use client";
 
 import {
-  Activity,
-  BadgeCheck,
   Building2,
   CircleCheck,
   Database,
   FolderOpen,
-  HardDrive,
   Layers3,
   LayoutDashboard,
   LoaderCircle,
@@ -219,11 +216,6 @@ export default function BimStreamer({
 
   const isStreamingAny = Object.values(modelStates).some(
     (state) => state.status === "streaming",
-  );
-
-  const streamedBytes = currentModels.reduce(
-    (total, model) => total + modelStates[model.id].bytesLoaded,
-    0,
   );
 
   const streamStatus = currentModels.some(
@@ -535,7 +527,6 @@ export default function BimStreamer({
               ThatOpen fragments
             </div>
             <h1>BIM file streamer</h1>
-            <p>{activeProject.description}</p>
           </div>
 
           <div className="dashboard-actions">
@@ -564,46 +555,6 @@ export default function BimStreamer({
             </button>
           </div>
         </header>
-
-        <section className="metric-grid" aria-label="Stream overview">
-          <article className="metric-card">
-            <span>Loaded models</span>
-            <div>
-              <strong>
-                {activeCount}/{currentModels.length}
-              </strong>
-              <BadgeCheck className="icon metric-icon" aria-hidden="true" />
-            </div>
-            <p>{formatBytes(streamedBytes)} streamed</p>
-          </article>
-
-          <article className="metric-card">
-            <span>Current model</span>
-            <div>
-              <strong>{activeModel?.name ?? activeProject.label}</strong>
-              <Building2 className="icon metric-icon" aria-hidden="true" />
-            </div>
-            <p>{activeProjectId === "casa" ? "Protected" : "Demo"} source</p>
-          </article>
-
-          <article className="metric-card">
-            <span>Viewer</span>
-            <div>
-              <strong>{isReady ? "Online" : "Starting"}</strong>
-              <Activity className="icon metric-icon" aria-hidden="true" />
-            </div>
-            <p>{bootError ?? "ThatOpen runtime"}</p>
-          </article>
-
-          <article className="metric-card">
-            <span>Stream status</span>
-            <div>
-              <strong>{streamStatus}</strong>
-              <HardDrive className="icon metric-icon" aria-hidden="true" />
-            </div>
-            <p>{activeProjectId === "casa" ? "Auth required" : "Public demo"}</p>
-          </article>
-        </section>
 
         <section className="project-grid">
           <section

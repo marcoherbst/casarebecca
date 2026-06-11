@@ -150,7 +150,6 @@ input {
 .admin-panel header span,
 .signed-in-user span,
 .header-eyebrow,
-.metric-card > span,
 .viewer-toolbar span,
 .panel-header span,
 .sidebar-brand span,
@@ -504,7 +503,7 @@ input {
 
 .dashboard-main {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   height: 100vh;
   gap: 16px;
@@ -571,51 +570,6 @@ input {
 .row-action:hover:not(:disabled),
 .icon-button:hover:not(:disabled) {
   transform: translateY(-1px);
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.metric-card {
-  display: grid;
-  min-width: 0;
-  min-height: 116px;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  box-shadow: var(--shadow-sm);
-}
-
-.metric-card div {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.metric-card strong {
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 1.3rem;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric-card p {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 0.86rem;
-}
-
-.metric-icon {
-  color: var(--muted);
 }
 
 .project-grid {
@@ -941,10 +895,6 @@ input {
     flex: 1;
   }
 
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .sidebar-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -977,7 +927,6 @@ input {
     padding: 12px;
   }
 
-  .metric-grid,
   .project-list,
   .auth-actions {
     grid-template-columns: 1fr;
