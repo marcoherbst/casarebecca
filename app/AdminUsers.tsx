@@ -178,7 +178,7 @@ export default function AdminUsers({ getAuthToken }: AdminUsersProps) {
     <section className="admin-panel" aria-label="User management">
       <header>
         <div>
-          <span>Admin</span>
+          <span>Settings</span>
           <h2>User management</h2>
         </div>
         <UsersRound className="icon" aria-hidden="true" />

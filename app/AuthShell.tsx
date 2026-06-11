@@ -1,6 +1,6 @@
 "use client";
 
-import { LogIn, LogOut, UsersRound } from "lucide-react";
+import { LogIn, LogOut } from "lucide-react";
 import type { Session, User } from "@supabase/supabase-js";
 import { useCallback, useEffect, useState } from "react";
 import AdminUsers from "./AdminUsers";
@@ -144,14 +144,10 @@ function fallbackUser(user: User): CurrentUser {
 
 export function AuthControls({
   currentUser,
-  isAdminOpen,
   onSignOut,
-  onToggleAdmin,
 }: {
   currentUser: CurrentUser | null;
-  isAdminOpen: boolean;
   onSignOut: () => void;
-  onToggleAdmin: () => void;
 }) {
   return (
     <div className="auth-controls">
@@ -161,17 +157,6 @@ export function AuthControls({
       </div>
 
       <div className="auth-actions">
-        {currentUser?.role === "admin" ? (
-          <button
-            aria-pressed={isAdminOpen}
-            className="admin-toggle"
-            onClick={onToggleAdmin}
-            type="button"
-          >
-            <UsersRound className="icon" aria-hidden="true" />
-            Users
-          </button>
-        ) : null}
         <button className="sign-out-button" onClick={onSignOut} type="button">
           <LogOut className="icon" aria-hidden="true" />
           Sign out
@@ -184,7 +169,7 @@ export function AuthControls({
 export default function AuthShell() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [currentUserError, setCurrentUserError] = useState<string | null>(null);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(!isSupabaseConfigured);
   const [session, setSession] = useState<Session | null>(null);
 
@@ -211,7 +196,7 @@ export default function AuthShell() {
       setIsLoaded(true);
       if (!nextSession) {
         setCurrentUser(null);
-        setIsAdminOpen(false);
+        setIsSettingsOpen(false);
       }
     });
 
@@ -282,6 +267,7 @@ export default function AuthShell() {
 
   const verifiedCurrentUser =
     currentUser && currentUser.id === session.user.id ? currentUser : null;
+  const canManageUsers = verifiedCurrentUser?.role === "admin";
 
   if (currentUserError) {
     return (
@@ -309,19 +295,19 @@ export default function AuthShell() {
         <>
           <AuthControls
             currentUser={verifiedCurrentUser ?? fallbackUser(session.user)}
-            isAdminOpen={isAdminOpen}
             onSignOut={() => void signOut()}
-            onToggleAdmin={() => setIsAdminOpen((open) => !open)}
           />
           {currentUserError ? (
             <p className="error-text auth-error">{currentUserError}</p>
           ) : null}
-          {isAdminOpen && verifiedCurrentUser?.role === "admin" ? (
-            <AdminUsers getAuthToken={getAuthToken} />
-          ) : null}
         </>
       }
       getAuthToken={getAuthToken}
+      isSettingsOpen={isSettingsOpen}
+      onSettingsToggle={() => setIsSettingsOpen((open) => !open)}
+      settingsSlot={
+        canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null
+      }
     />
   );
 }

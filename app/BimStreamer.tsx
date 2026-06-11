@@ -4,6 +4,7 @@ import {
   Building2,
   Layers3,
   LoaderCircle,
+  Settings,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -57,6 +58,9 @@ type Runtime = {
 type BimStreamerProps = {
   controlSlot?: ReactNode;
   getAuthToken?: () => Promise<string | null>;
+  isSettingsOpen?: boolean;
+  onSettingsToggle?: () => void;
+  settingsSlot?: ReactNode;
 };
 
 const DEMO_MODELS: DemoModel[] = [
@@ -164,6 +168,9 @@ async function streamModel(
 export default function BimStreamer({
   controlSlot,
   getAuthToken,
+  isSettingsOpen = false,
+  onSettingsToggle,
+  settingsSlot,
 }: BimStreamerProps = {}) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
@@ -490,20 +497,38 @@ export default function BimStreamer({
         id="dashboard-main"
         aria-label="BIM dashboard"
       >
-        <section className="project-grid">
+        <section
+          className={`project-grid${isSettingsOpen && settingsSlot ? " has-settings" : ""}`}
+        >
           <section
             className="viewer-card"
             id="stream-viewer"
             aria-label="BIM stream viewer"
           >
             <div className="viewer-toolbar">
-              <div>
+              <div className="viewer-toolbar-title">
                 <span>Viewport</span>
                 <strong>{activeModel?.name ?? "Casa Rebecca"}</strong>
               </div>
-              <span className={`status-badge status-${streamStatus.toLowerCase().replace(" ", "-")}`}>
-                {streamStatus}
-              </span>
+              <div className="viewer-toolbar-actions">
+                {settingsSlot ? (
+                  <button
+                    aria-label="Settings"
+                    aria-pressed={isSettingsOpen}
+                    className="settings-toggle"
+                    onClick={onSettingsToggle}
+                    title="Settings"
+                    type="button"
+                  >
+                    <Settings className="icon" aria-hidden="true" />
+                  </button>
+                ) : null}
+                <span
+                  className={`status-badge status-${streamStatus.toLowerCase().replace(" ", "-")}`}
+                >
+                  {streamStatus}
+                </span>
+              </div>
             </div>
 
             <div className="viewer-surface" ref={viewerRef}>
@@ -520,6 +545,11 @@ export default function BimStreamer({
             </div>
           </section>
 
+          {isSettingsOpen && settingsSlot ? (
+            <section className="settings-panel" aria-label="Settings">
+              {settingsSlot}
+            </section>
+          ) : null}
         </section>
       </section>
     </main>
