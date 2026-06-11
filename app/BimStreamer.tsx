@@ -2,7 +2,6 @@
 
 import {
   Building2,
-  CircleCheck,
   Database,
   Layers3,
   LayoutDashboard,
@@ -122,18 +121,6 @@ const initialModelState = (): Record<string, ModelState> =>
     ]),
   );
 
-const formatBytes = (bytes: number) => {
-  if (!bytes) return "0 MB";
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-};
-
-const statusLabel = (status: ModelStatus) => {
-  if (status === "idle") return "Ready";
-  if (status === "streaming") return "Streaming";
-  if (status === "loaded") return "Loaded";
-  return "Error";
-};
-
 async function streamModel(
   url: string,
   onProgress: (bytesLoaded: number, bytesTotal: number) => void,
@@ -179,16 +166,12 @@ export default function BimStreamer({
 }: BimStreamerProps = {}) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
-  const initialLoadStartedRef = useRef(false);
+  const autoLoadedProjectRef = useRef<ProjectId | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<ProjectId>("casa");
-
-  const activeProject = PROJECTS.find(
-    (project) => project.id === activeProjectId,
-  )!;
 
   const currentModels = useMemo(
     () => MODELS.filter((model) => model.project === activeProjectId),
@@ -379,24 +362,6 @@ export default function BimStreamer({
     [getAuthToken, modelStates, setModelState],
   );
 
-  const unloadModel = async (model: DemoModel) => {
-    const runtime = runtimeRef.current;
-    if (!runtime) return;
-
-    if (runtime.fragments.list.has(model.id)) {
-      await runtime.fragments.core.disposeModel(model.id);
-      runtime.fragments.core.update(true);
-    }
-
-    setModelState(model.id, {
-      bytesLoaded: 0,
-      bytesTotal: 0,
-      error: undefined,
-      percent: 0,
-      status: "idle",
-    });
-  };
-
   const unloadAllModels = async () => {
     const runtime = runtimeRef.current;
     if (runtime) {
@@ -415,6 +380,7 @@ export default function BimStreamer({
   const switchProject = async (project: ProjectId) => {
     if (project === activeProjectId) return;
     await unloadAllModels();
+    autoLoadedProjectRef.current = null;
     setActiveProjectId(project);
   };
 
@@ -428,15 +394,11 @@ export default function BimStreamer({
   }, [currentModels, loadModel, modelStates]);
 
   useEffect(() => {
-    if (
-      !isReady ||
-      activeProjectId !== "casa" ||
-      initialLoadStartedRef.current
-    ) {
+    if (!isReady || autoLoadedProjectRef.current === activeProjectId) {
       return;
     }
 
-    initialLoadStartedRef.current = true;
+    autoLoadedProjectRef.current = activeProjectId;
     void loadAll();
   }, [activeProjectId, isReady, loadAll]);
 
@@ -460,10 +422,6 @@ export default function BimStreamer({
           >
             <LayoutDashboard className="icon" aria-hidden="true" />
             Dashboard
-          </a>
-          <a className="sidebar-nav-item" href="#model-set">
-            <Layers3 className="icon" aria-hidden="true" />
-            Models
           </a>
           <a className="sidebar-nav-item" href="#stream-viewer">
             <Database className="icon" aria-hidden="true" />
@@ -542,103 +500,6 @@ export default function BimStreamer({
             </div>
           </section>
 
-          <aside
-            className="models-panel"
-            id="model-set"
-            aria-label="Model streaming controls"
-          >
-            <div className="panel-header">
-              <div>
-                <span>Project</span>
-                <h2>{activeProject.label}</h2>
-              </div>
-            </div>
-
-            <div className="model-table">
-              <div className="model-table-head">
-                <span>Model</span>
-                <span>Status</span>
-                <span>Action</span>
-              </div>
-
-              {currentModels.map((model) => {
-                const state = modelStates[model.id];
-                const isLoaded = state.status === "loaded";
-                const isStreaming = state.status === "streaming";
-                const isActive = activeModelId === model.id;
-                const isBlocked = !model.url;
-
-                return (
-                  <article
-                    className={`model-table-row ${
-                      isActive ? "model-table-row-active" : ""
-                    } ${isBlocked ? "model-table-row-blocked" : ""}`}
-                    key={model.id}
-                  >
-                    <div className="model-identity">
-                      <div className="model-icon" aria-hidden="true">
-                        {state.status === "loaded" ? (
-                          <CircleCheck className="icon" />
-                        ) : state.status === "streaming" ? (
-                          <LoaderCircle className="icon spin" />
-                        ) : state.status === "error" || isBlocked ? (
-                          <TriangleAlert className="icon" />
-                        ) : (
-                          <Building2 className="icon" />
-                        )}
-                      </div>
-                      <div>
-                        <h3>{model.name}</h3>
-                        <p>{model.description}</p>
-                        <small>
-                          {model.size} · {model.sourceFormat}
-                        </small>
-                      </div>
-                    </div>
-
-                    <div className="model-status-cell">
-                      <span className={`status-badge status-${state.status}`}>
-                        {isBlocked ? "Blocked" : statusLabel(state.status)}
-                      </span>
-                      <div className="progress-track">
-                        <span style={{ width: `${state.percent}%` }} />
-                      </div>
-                      <small>
-                        {isBlocked
-                          ? "Not streamable"
-                          : state.bytesLoaded
-                            ? `${formatBytes(state.bytesLoaded)} streamed`
-                            : "Ready"}
-                      </small>
-                    </div>
-
-                    <button
-                      className="row-action"
-                      disabled={!isReady || isStreaming || isBlocked}
-                      onClick={() =>
-                        void (isLoaded ? unloadModel(model) : loadModel(model))
-                      }
-                      type="button"
-                    >
-                      {isBlocked
-                        ? "Needs IFC"
-                        : isLoaded
-                          ? "Unload"
-                          : isStreaming
-                            ? "Streaming"
-                            : "Load"}
-                    </button>
-
-                    {state.error || model.disabledReason ? (
-                      <p className="error-text">
-                        {state.error ?? model.disabledReason}
-                      </p>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
-          </aside>
         </section>
       </section>
     </main>

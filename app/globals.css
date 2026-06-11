@@ -150,7 +150,6 @@ input {
 .admin-panel header span,
 .signed-in-user span,
 .viewer-toolbar span,
-.panel-header span,
 .sidebar-brand span,
 .sidebar-projects > span {
   color: var(--muted-foreground);
@@ -177,8 +176,7 @@ input {
 .admin-toggle,
 .sign-out-button,
 .invite-form button,
-.admin-user-row button,
-.row-action {
+.admin-user-row button {
   display: inline-flex;
   min-height: 36px;
   align-items: center;
@@ -244,8 +242,7 @@ input {
 }
 
 .sidebar-brand div:last-child,
-.signed-in-user,
-.model-identity div:last-child {
+.signed-in-user {
   min-width: 0;
 }
 
@@ -508,20 +505,17 @@ input {
   padding: 18px;
 }
 
-.row-action:hover:not(:disabled),
 button.project-button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
 .project-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
-  gap: 16px;
 }
 
-.viewer-card,
-.models-panel {
+.viewer-card {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
@@ -589,118 +583,6 @@ button.project-button:hover:not(:disabled) {
   font-weight: 700;
 }
 
-.models-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.panel-header h2 {
-  margin: 3px 0 0;
-  font-size: 1.02rem;
-  line-height: 1.2;
-}
-
-.model-table {
-  min-height: 0;
-  overflow: auto;
-  border-top: 1px solid var(--border);
-}
-
-.model-table-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) 128px 84px;
-  gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.model-table-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) 128px 84px;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-}
-
-.model-table-row-active {
-  background: #f8fffb;
-}
-
-.model-table-row-blocked {
-  background: #fffbeb;
-}
-
-.model-identity {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.model-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--secondary);
-  color: var(--muted-foreground);
-}
-
-.model-identity h3 {
-  margin: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 0.94rem;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-identity p,
-.model-identity small,
-.model-status-cell small {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 0.78rem;
-  line-height: 1.35;
-}
-
-.model-identity p {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.model-status-cell {
-  display: grid;
-  min-width: 0;
-  gap: 7px;
-}
-
 .status-badge {
   display: inline-flex;
   width: max-content;
@@ -740,28 +622,6 @@ button.project-button:hover:not(:disabled) {
 .status-idle {
   background: var(--secondary);
   color: var(--muted-foreground);
-}
-
-.progress-track {
-  height: 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--secondary);
-}
-
-.progress-track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--primary);
-  transition: width 180ms ease;
-}
-
-.row-action {
-  min-width: 0;
-  padding: 0 10px;
-  background: var(--secondary);
-  color: var(--secondary-foreground);
 }
 
 .error-text {
@@ -818,26 +678,11 @@ button.project-button:hover:not(:disabled) {
     min-height: 0;
   }
 
-  .models-panel {
-    min-height: 420px;
-  }
 }
 
 @media (max-width: 760px) {
   .sidebar-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .model-table-head {
-    display: none;
-  }
-
-  .model-table-row {
-    grid-template-columns: 1fr;
-  }
-
-  .row-action {
-    width: 100%;
   }
 
   .viewer-card {
