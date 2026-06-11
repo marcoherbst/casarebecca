@@ -27,14 +27,14 @@ import {
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
-type DatasetId = "demo" | "casa";
+type ProjectId = "demo" | "casa";
 
 type DemoModel = {
-  dataset: DatasetId;
   description: string;
   disabledReason?: string;
   id: string;
   name: string;
+  project: ProjectId;
   sourceFormat: string;
   size: string;
   url?: string;
@@ -70,51 +70,51 @@ type BimStreamerProps = {
 
 const MODELS: DemoModel[] = [
   {
-    dataset: "demo",
     description: "Architectural shell, rooms, walls, slabs, and openings",
     id: "school_arq",
     name: "School Architecture",
+    project: "demo",
     sourceFormat: "Fragments",
     size: "3.4 MB",
     url: "/models/school_arq.frag",
   },
   {
-    dataset: "demo",
     description: "Structural frame loaded as a separate BIM discipline",
     id: "school_str",
     name: "School Structure",
+    project: "demo",
     sourceFormat: "Fragments",
     size: "0.7 MB",
     url: "/models/school_str.frag",
   },
   {
-    dataset: "casa",
     description: "IFC4 export converted into a streamable ThatOpen Fragment",
     id: "casa_rebecca",
     name: "Casa Rebecca",
+    project: "casa",
     sourceFormat: "Fragments",
     size: "12.4 MB",
     url: "/api/models/casa_rebecca",
   },
 ];
 
-const DATASETS: Array<{
+const PROJECTS: Array<{
   action: string;
   description: string;
-  id: DatasetId;
+  id: ProjectId;
   label: string;
 }> = [
-  {
-    action: "Stream demo BIM",
-    description: "Hosted sample: ThatOpen school model",
-    id: "demo",
-    label: "Demo models",
-  },
   {
     action: "Load Casa Rebecca",
     description: "IFC4 export converted to Fragments",
     id: "casa",
     label: "Casa Rebecca",
+  },
+  {
+    action: "Stream demo BIM",
+    description: "Hosted sample: ThatOpen school model",
+    id: "demo",
+    label: "Demo",
   },
 ];
 
@@ -193,15 +193,15 @@ export default function BimStreamer({
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
-  const [activeDatasetId, setActiveDatasetId] = useState<DatasetId>("casa");
+  const [activeProjectId, setActiveProjectId] = useState<ProjectId>("casa");
 
-  const activeDataset = DATASETS.find(
-    (dataset) => dataset.id === activeDatasetId,
+  const activeProject = PROJECTS.find(
+    (project) => project.id === activeProjectId,
   )!;
 
   const currentModels = useMemo(
-    () => MODELS.filter((model) => model.dataset === activeDatasetId),
-    [activeDatasetId],
+    () => MODELS.filter((model) => model.project === activeProjectId),
+    [activeProjectId],
   );
 
   const hasStreamableModels = currentModels.some((model) => model.url);
@@ -428,10 +428,10 @@ export default function BimStreamer({
     setModelStates(initialModelState());
   };
 
-  const switchDataset = async (dataset: DatasetId) => {
-    if (dataset === activeDatasetId) return;
+  const switchProject = async (project: ProjectId) => {
+    if (project === activeProjectId) return;
     await unloadAllModels();
-    setActiveDatasetId(dataset);
+    setActiveProjectId(project);
   };
 
   const loadAll = useCallback(async () => {
@@ -446,7 +446,7 @@ export default function BimStreamer({
   useEffect(() => {
     if (
       !isReady ||
-      activeDatasetId !== "casa" ||
+      activeProjectId !== "casa" ||
       initialLoadStartedRef.current
     ) {
       return;
@@ -454,11 +454,11 @@ export default function BimStreamer({
 
     initialLoadStartedRef.current = true;
     void loadAll();
-  }, [activeDatasetId, isReady, loadAll]);
+  }, [activeProjectId, isReady, loadAll]);
 
   return (
     <main className="dashboard-app">
-      <aside className="app-sidebar" aria-label="Workspace navigation">
+      <aside className="app-sidebar" aria-label="Project navigation">
         <div className="sidebar-brand">
           <div className="brand-mark" aria-hidden="true">
             <Building2 className="icon" />
@@ -491,11 +491,30 @@ export default function BimStreamer({
           </a>
         </nav>
 
-        <div className="sidebar-summary" aria-label="Workspace status">
-          <span>Active workspace</span>
-          <strong>{activeDataset.label}</strong>
-          <p>{activeCount} loaded</p>
-        </div>
+        <section className="sidebar-projects" aria-label="Projects">
+          <span>Projects</span>
+          <div className="project-list">
+            {PROJECTS.map((project) => (
+              <button
+                aria-pressed={activeProjectId === project.id}
+                className="project-button"
+                key={project.id}
+                onClick={() => void switchProject(project.id)}
+                type="button"
+              >
+                {project.id === "casa" ? (
+                  <Building2 className="icon" aria-hidden="true" />
+                ) : (
+                  <Layers3 className="icon" aria-hidden="true" />
+                )}
+                <span>
+                  <strong>{project.label}</strong>
+                  <small>{project.description}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <div className="sidebar-footer" id="access-controls">
           {controlSlot ? (
@@ -516,7 +535,7 @@ export default function BimStreamer({
               ThatOpen fragments
             </div>
             <h1>BIM file streamer</h1>
-            <p>{activeDataset.description}</p>
+            <p>{activeProject.description}</p>
           </div>
 
           <div className="dashboard-actions">
@@ -541,7 +560,7 @@ export default function BimStreamer({
               ) : (
                 <Play className="icon" aria-hidden="true" />
               )}
-              {hasStreamableModels ? activeDataset.action : "Needs conversion"}
+              {hasStreamableModels ? activeProject.action : "Needs conversion"}
             </button>
           </div>
         </header>
@@ -561,10 +580,10 @@ export default function BimStreamer({
           <article className="metric-card">
             <span>Current model</span>
             <div>
-              <strong>{activeModel?.name ?? activeDataset.label}</strong>
+              <strong>{activeModel?.name ?? activeProject.label}</strong>
               <Building2 className="icon metric-icon" aria-hidden="true" />
             </div>
-            <p>{activeDatasetId === "casa" ? "Protected" : "Demo"} source</p>
+            <p>{activeProjectId === "casa" ? "Protected" : "Demo"} source</p>
           </article>
 
           <article className="metric-card">
@@ -582,11 +601,11 @@ export default function BimStreamer({
               <strong>{streamStatus}</strong>
               <HardDrive className="icon metric-icon" aria-hidden="true" />
             </div>
-            <p>{activeDatasetId === "casa" ? "Auth required" : "Public demo"}</p>
+            <p>{activeProjectId === "casa" ? "Auth required" : "Public demo"}</p>
           </article>
         </section>
 
-        <section className="workspace-grid">
+        <section className="project-grid">
           <section
             className="viewer-card"
             id="stream-viewer"
@@ -623,27 +642,9 @@ export default function BimStreamer({
           >
             <div className="panel-header">
               <div>
-                <span>Model set</span>
-                <h2>{activeDataset.label}</h2>
+                <span>Project</span>
+                <h2>{activeProject.label}</h2>
               </div>
-            </div>
-
-            <div className="dataset-switcher" aria-label="Model set">
-              {DATASETS.map((dataset) => (
-                <button
-                  aria-pressed={activeDatasetId === dataset.id}
-                  key={dataset.id}
-                  onClick={() => void switchDataset(dataset.id)}
-                  type="button"
-                >
-                  {dataset.id === "casa" ? (
-                    <Building2 className="icon" aria-hidden="true" />
-                  ) : (
-                    <Layers3 className="icon" aria-hidden="true" />
-                  )}
-                  <span>{dataset.label}</span>
-                </button>
-              ))}
             </div>
 
             <div className="model-table">
