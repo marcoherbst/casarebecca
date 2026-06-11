@@ -37,6 +37,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 /dist/
+/dist-vercel/
 /.wrangler/
 
 # large source BIM files downloaded for local conversion attempts

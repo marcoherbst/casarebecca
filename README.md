@@ -34,8 +34,15 @@ viewer. The app streams that Fragment file from the Casa Rebecca tab.
 npm install
 npm run dev
 npm run build
+npm run build:vercel
 npm run lint
 ```
+
+## Public Vercel Deployment
+
+Vercel uses `vercel.json` to force the project framework to `Other` and build a
+static Vite version of the viewer into `dist-vercel/`. The raw conversion
+workspace in `source-models/` is excluded from Vercel uploads.
 
 ## Stack
 
