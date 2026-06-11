@@ -2,11 +2,8 @@
 
 import {
   Building2,
-  Database,
   Layers3,
-  LayoutDashboard,
   LoaderCircle,
-  ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -414,24 +411,6 @@ export default function BimStreamer({
             <strong>Casa Rebecca</strong>
           </div>
         </div>
-
-        <nav className="sidebar-nav">
-          <a
-            className="sidebar-nav-item sidebar-nav-item-active"
-            href="#dashboard-main"
-          >
-            <LayoutDashboard className="icon" aria-hidden="true" />
-            Dashboard
-          </a>
-          <a className="sidebar-nav-item" href="#stream-viewer">
-            <Database className="icon" aria-hidden="true" />
-            Streams
-          </a>
-          <a className="sidebar-nav-item" href="#access-controls">
-            <ShieldCheck className="icon" aria-hidden="true" />
-            Access
-          </a>
-        </nav>
 
         <section className="sidebar-projects" aria-label="Projects">
           <span>Projects</span>

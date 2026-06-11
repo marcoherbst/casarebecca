@@ -255,31 +255,6 @@ input {
   white-space: nowrap;
 }
 
-.sidebar-nav {
-  display: grid;
-  gap: 4px;
-}
-
-.sidebar-nav-item {
-  display: flex;
-  min-height: 36px;
-  align-items: center;
-  gap: 10px;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  padding: 8px 10px;
-  text-align: left;
-  text-decoration: none;
-  font-weight: 650;
-}
-
-.sidebar-nav-item-active {
-  background: var(--foreground);
-  color: var(--card);
-}
-
 .sidebar-projects {
   display: grid;
   gap: 8px;
@@ -648,10 +623,6 @@ button.project-button:hover:not(:disabled) {
     border-bottom: 1px solid var(--border);
   }
 
-  .sidebar-nav {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
   .project-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -681,10 +652,6 @@ button.project-button:hover:not(:disabled) {
 }
 
 @media (max-width: 760px) {
-  .sidebar-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .viewer-card {
     height: 68vh;
     min-height: 420px;
