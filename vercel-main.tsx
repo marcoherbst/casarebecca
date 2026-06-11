@@ -1,10 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import BimStreamer from "./app/BimStreamer";
+import AuthShell from "./app/AuthShell";
 import "./app/globals.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BimStreamer />
+    <AuthShell />
   </React.StrictMode>,
 );

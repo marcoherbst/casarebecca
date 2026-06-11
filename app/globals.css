@@ -39,6 +39,77 @@ button {
   font: inherit;
 }
 
+input,
+select {
+  min-width: 0;
+  font: inherit;
+}
+
+.auth-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(115deg, rgba(47, 127, 104, 0.14) 0 32%, transparent 32%),
+    linear-gradient(26deg, transparent 0 76%, rgba(24, 80, 116, 0.16) 76%),
+    var(--background);
+}
+
+.auth-panel {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid rgba(23, 26, 22, 0.12);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.auth-panel span,
+.admin-panel header span,
+.signed-in-user span {
+  color: var(--accent-strong);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.auth-panel h1,
+.admin-panel h2 {
+  margin: 0;
+  line-height: 1;
+}
+
+.auth-panel p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.google-sign-in,
+.admin-toggle,
+.sign-out-button,
+.invite-form button,
+.admin-user-row button {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.google-sign-in {
+  min-height: 44px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.google-sign-in:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .bim-app {
   min-height: 100vh;
   padding: 18px;
@@ -108,6 +179,190 @@ button {
   padding: 22px;
   border-left: 1px solid rgba(23, 26, 22, 0.12);
   background: var(--panel);
+}
+
+.control-slot {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.signed-in-user {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.signed-in-user strong {
+  overflow: hidden;
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-toggle {
+  min-height: 34px;
+  padding: 7px 10px;
+  background: #e6eef1;
+  color: #185074;
+}
+
+.admin-toggle[aria-pressed="true"] {
+  background: #185074;
+  color: #fff;
+}
+
+.sign-out-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  background: #eef2eb;
+  color: var(--accent-strong);
+}
+
+.auth-error {
+  margin: 0;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8faf7;
+}
+
+.admin-panel header {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-panel h2 {
+  font-size: 1.05rem;
+}
+
+.invite-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 76px;
+  gap: 8px;
+}
+
+.invite-form input,
+.invite-form select,
+.admin-user-row select {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--foreground);
+}
+
+.invite-form input {
+  padding: 0 10px;
+}
+
+.invite-form select,
+.admin-user-row select {
+  padding: 0 8px;
+}
+
+.invite-form button,
+.admin-user-row button {
+  min-height: 36px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.invite-form button:disabled,
+.admin-user-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.admin-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.admin-user-list,
+.invitation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px 76px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.admin-user-row div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.admin-user-row strong,
+.admin-user-row span,
+.admin-user-row small,
+.invitation-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user-row span,
+.admin-user-row small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-user-row button {
+  background: #eef2eb;
+  color: #8b3329;
+}
+
+.invitation-list {
+  padding-top: 4px;
+}
+
+.invitation-list h3 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.invitation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.invitation-row strong {
+  color: var(--accent-strong);
 }
 
 .control-panel header {
@@ -326,5 +581,10 @@ button {
 
   .row-footer button {
     width: 100%;
+  }
+
+  .invite-form,
+  .admin-user-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
@@ -40,6 +47,11 @@ type Runtime = {
   };
 };
 
+type BimStreamerProps = {
+  controlSlot?: ReactNode;
+  getAuthToken?: () => Promise<string | null>;
+};
+
 const MODELS: DemoModel[] = [
   {
     dataset: "demo",
@@ -66,7 +78,7 @@ const MODELS: DemoModel[] = [
     name: "Casa Rebecca",
     sourceFormat: "Fragments",
     size: "12.4 MB",
-    url: "/models/casa_rebecca.frag",
+    url: "/api/models/casa_rebecca",
   },
 ];
 
@@ -111,8 +123,13 @@ const formatBytes = (bytes: number) => {
 async function streamModel(
   url: string,
   onProgress: (bytesLoaded: number, bytesTotal: number) => void,
+  getAuthToken?: () => Promise<string | null>,
 ) {
-  const response = await fetch(url);
+  const token = getAuthToken ? await getAuthToken() : null;
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
   if (!response.ok || !response.body) {
     throw new Error(`Could not stream ${url}`);
   }
@@ -142,7 +159,10 @@ async function streamModel(
   return buffer.buffer;
 }
 
-export default function BimStreamer() {
+export default function BimStreamer({
+  controlSlot,
+  getAuthToken,
+}: BimStreamerProps = {}) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
   const initialLoadStartedRef = useRef(false);
@@ -290,15 +310,19 @@ export default function BimStreamer() {
           status: "streaming",
         });
 
-        const buffer = await streamModel(model.url, (bytesLoaded, bytesTotal) => {
-          setModelState(model.id, {
-            bytesLoaded,
-            bytesTotal,
-            percent: bytesTotal
-              ? Math.min(100, Math.round((bytesLoaded / bytesTotal) * 100))
-              : 0,
-          });
-        });
+        const buffer = await streamModel(
+          model.url,
+          (bytesLoaded, bytesTotal) => {
+            setModelState(model.id, {
+              bytesLoaded,
+              bytesTotal,
+              percent: bytesTotal
+                ? Math.min(100, Math.round((bytesLoaded / bytesTotal) * 100))
+                : 0,
+            });
+          },
+          getAuthToken,
+        );
         const streamedBytes = buffer.byteLength;
 
         await runtime.fragments.core.load(buffer, { modelId: model.id });
@@ -319,7 +343,7 @@ export default function BimStreamer() {
         });
       }
     },
-    [modelStates, setModelState],
+    [getAuthToken, modelStates, setModelState],
   );
 
   const unloadModel = async (model: DemoModel) => {
@@ -395,6 +419,10 @@ export default function BimStreamer() {
         </div>
 
         <aside className="control-panel" aria-label="Model streaming controls">
+          {controlSlot ? (
+            <div className="control-slot">{controlSlot}</div>
+          ) : null}
+
           <header>
             <span>ThatOpen fragments</span>
             <h1>BIM file streamer</h1>
