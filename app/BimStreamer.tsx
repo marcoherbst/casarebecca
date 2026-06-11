@@ -1,6 +1,22 @@
 "use client";
 
 import {
+  Activity,
+  BadgeCheck,
+  Building2,
+  CircleCheck,
+  Database,
+  FolderOpen,
+  HardDrive,
+  Layers3,
+  LayoutDashboard,
+  LoaderCircle,
+  Play,
+  RotateCcw,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
+import {
   type ReactNode,
   useCallback,
   useEffect,
@@ -120,6 +136,13 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 };
 
+const statusLabel = (status: ModelStatus) => {
+  if (status === "idle") return "Ready";
+  if (status === "streaming") return "Streaming";
+  if (status === "loaded") return "Loaded";
+  return "Error";
+};
+
 async function streamModel(
   url: string,
   onProgress: (bytesLoaded: number, bytesTotal: number) => void,
@@ -189,6 +212,29 @@ export default function BimStreamer({
         .length,
     [currentModels, modelStates],
   );
+
+  const activeModel = activeModelId
+    ? MODELS.find((model) => model.id === activeModelId)
+    : null;
+
+  const isStreamingAny = Object.values(modelStates).some(
+    (state) => state.status === "streaming",
+  );
+
+  const streamedBytes = currentModels.reduce(
+    (total, model) => total + modelStates[model.id].bytesLoaded,
+    0,
+  );
+
+  const streamStatus = currentModels.some(
+    (model) => modelStates[model.id].status === "error",
+  )
+    ? "Needs attention"
+    : isStreamingAny
+      ? "Streaming"
+      : activeCount
+        ? "Ready"
+        : "Idle";
 
   useEffect(() => {
     let cancelled = false;
@@ -335,10 +381,13 @@ export default function BimStreamer({
         });
       } catch (error) {
         setModelState(model.id, {
+          bytesLoaded: 0,
+          bytesTotal: 0,
           error:
             error instanceof Error
               ? error.message
               : "This model could not be loaded.",
+          percent: 0,
           status: "error",
         });
       }
@@ -408,101 +457,258 @@ export default function BimStreamer({
   }, [activeDatasetId, isReady, loadAll]);
 
   return (
-    <main className="bim-app">
-      <section className="viewer-shell" aria-label="BIM stream viewer">
-        <div className="viewer-surface" ref={viewerRef}>
-          {!isReady ? (
-            <div className="viewer-state">
-              <span>{bootError ?? "Starting ThatOpen viewer..."}</span>
-            </div>
-          ) : null}
+    <main className="dashboard-app">
+      <aside className="app-sidebar" aria-label="Workspace navigation">
+        <div className="sidebar-brand">
+          <div className="brand-mark" aria-hidden="true">
+            <Building2 className="icon" />
+          </div>
+          <div>
+            <span>Evercam BIM</span>
+            <strong>Casa Rebecca</strong>
+          </div>
         </div>
 
-        <aside className="control-panel" aria-label="Model streaming controls">
+        <nav className="sidebar-nav">
+          <a
+            className="sidebar-nav-item sidebar-nav-item-active"
+            href="#dashboard-main"
+          >
+            <LayoutDashboard className="icon" aria-hidden="true" />
+            Dashboard
+          </a>
+          <a className="sidebar-nav-item" href="#model-set">
+            <Layers3 className="icon" aria-hidden="true" />
+            Models
+          </a>
+          <a className="sidebar-nav-item" href="#stream-viewer">
+            <Database className="icon" aria-hidden="true" />
+            Streams
+          </a>
+          <a className="sidebar-nav-item" href="#access-controls">
+            <ShieldCheck className="icon" aria-hidden="true" />
+            Access
+          </a>
+        </nav>
+
+        <div className="sidebar-summary" aria-label="Workspace status">
+          <span>Active workspace</span>
+          <strong>{activeDataset.label}</strong>
+          <p>{activeCount} loaded</p>
+        </div>
+
+        <div className="sidebar-footer" id="access-controls">
           {controlSlot ? (
             <div className="control-slot">{controlSlot}</div>
           ) : null}
+        </div>
+      </aside>
 
-          <header>
-            <span>ThatOpen fragments</span>
+      <section
+        className="dashboard-main"
+        id="dashboard-main"
+        aria-label="BIM dashboard"
+      >
+        <header className="dashboard-header">
+          <div>
+            <div className="header-eyebrow">
+              <FolderOpen className="icon" aria-hidden="true" />
+              ThatOpen fragments
+            </div>
             <h1>BIM file streamer</h1>
             <p>{activeDataset.description}</p>
-          </header>
-
-          <div className="dataset-switcher" aria-label="Model set">
-            {DATASETS.map((dataset) => (
-              <button
-                aria-pressed={activeDatasetId === dataset.id}
-                key={dataset.id}
-                onClick={() => void switchDataset(dataset.id)}
-                type="button"
-              >
-                {dataset.label}
-              </button>
-            ))}
           </div>
 
-          <div className="status-strip">
-            <strong>{activeCount}</strong>
-            <span>{activeCount === 1 ? "model loaded" : "models loaded"}</span>
+          <div className="dashboard-actions">
+            <button
+              aria-label="Reset loaded models"
+              className="icon-button"
+              disabled={isStreamingAny}
+              onClick={() => void unloadAllModels()}
+              title="Reset loaded models"
+              type="button"
+            >
+              <RotateCcw className="icon" aria-hidden="true" />
+            </button>
+            <button
+              className="primary-action"
+              disabled={!isReady || !hasStreamableModels || isStreamingAny}
+              onClick={() => void loadAll()}
+              type="button"
+            >
+              {isStreamingAny ? (
+                <LoaderCircle className="icon spin" aria-hidden="true" />
+              ) : (
+                <Play className="icon" aria-hidden="true" />
+              )}
+              {hasStreamableModels ? activeDataset.action : "Needs conversion"}
+            </button>
           </div>
+        </header>
 
-          <button
-            className="primary-action"
-            disabled={
-              !isReady ||
-              !hasStreamableModels ||
-              Object.values(modelStates).some(
-                (state) => state.status === "streaming",
-              )
-            }
-            onClick={loadAll}
-            type="button"
+        <section className="metric-grid" aria-label="Stream overview">
+          <article className="metric-card">
+            <span>Loaded models</span>
+            <div>
+              <strong>
+                {activeCount}/{currentModels.length}
+              </strong>
+              <BadgeCheck className="icon metric-icon" aria-hidden="true" />
+            </div>
+            <p>{formatBytes(streamedBytes)} streamed</p>
+          </article>
+
+          <article className="metric-card">
+            <span>Current model</span>
+            <div>
+              <strong>{activeModel?.name ?? activeDataset.label}</strong>
+              <Building2 className="icon metric-icon" aria-hidden="true" />
+            </div>
+            <p>{activeDatasetId === "casa" ? "Protected" : "Demo"} source</p>
+          </article>
+
+          <article className="metric-card">
+            <span>Viewer</span>
+            <div>
+              <strong>{isReady ? "Online" : "Starting"}</strong>
+              <Activity className="icon metric-icon" aria-hidden="true" />
+            </div>
+            <p>{bootError ?? "ThatOpen runtime"}</p>
+          </article>
+
+          <article className="metric-card">
+            <span>Stream status</span>
+            <div>
+              <strong>{streamStatus}</strong>
+              <HardDrive className="icon metric-icon" aria-hidden="true" />
+            </div>
+            <p>{activeDatasetId === "casa" ? "Auth required" : "Public demo"}</p>
+          </article>
+        </section>
+
+        <section className="workspace-grid">
+          <section
+            className="viewer-card"
+            id="stream-viewer"
+            aria-label="BIM stream viewer"
           >
-            {hasStreamableModels ? activeDataset.action : "Needs conversion"}
-          </button>
+            <div className="viewer-toolbar">
+              <div>
+                <span>Viewport</span>
+                <strong>{activeModel?.name ?? "Casa Rebecca"}</strong>
+              </div>
+              <span className={`status-badge status-${streamStatus.toLowerCase().replace(" ", "-")}`}>
+                {streamStatus}
+              </span>
+            </div>
 
-          <div className="model-list">
-            {currentModels.map((model) => {
-              const state = modelStates[model.id];
-              const isLoaded = state.status === "loaded";
-              const isStreaming = state.status === "streaming";
-              const isActive = activeModelId === model.id;
-              const isBlocked = !model.url;
+            <div className="viewer-surface" ref={viewerRef}>
+              {!isReady ? (
+                <div className="viewer-state">
+                  {bootError ? (
+                    <TriangleAlert className="icon-lg" aria-hidden="true" />
+                  ) : (
+                    <LoaderCircle className="icon-lg spin" aria-hidden="true" />
+                  )}
+                  <span>{bootError ?? "Starting ThatOpen viewer..."}</span>
+                </div>
+              ) : null}
+            </div>
+          </section>
 
-              return (
-                <article
-                  className={`model-row ${isActive ? "model-row-active" : ""} ${
-                    isBlocked ? "model-row-blocked" : ""
-                  }`}
-                  key={model.id}
+          <aside
+            className="models-panel"
+            id="model-set"
+            aria-label="Model streaming controls"
+          >
+            <div className="panel-header">
+              <div>
+                <span>Model set</span>
+                <h2>{activeDataset.label}</h2>
+              </div>
+            </div>
+
+            <div className="dataset-switcher" aria-label="Model set">
+              {DATASETS.map((dataset) => (
+                <button
+                  aria-pressed={activeDatasetId === dataset.id}
+                  key={dataset.id}
+                  onClick={() => void switchDataset(dataset.id)}
+                  type="button"
                 >
-                  <div>
-                    <h2>{model.name}</h2>
-                    <p>{model.description}</p>
-                  </div>
+                  {dataset.id === "casa" ? (
+                    <Building2 className="icon" aria-hidden="true" />
+                  ) : (
+                    <Layers3 className="icon" aria-hidden="true" />
+                  )}
+                  <span>{dataset.label}</span>
+                </button>
+              ))}
+            </div>
 
-                  <div className="model-meta">
-                    <span>{model.size}</span>
-                    <span>{isBlocked ? model.sourceFormat : state.status}</span>
-                  </div>
+            <div className="model-table">
+              <div className="model-table-head">
+                <span>Model</span>
+                <span>Status</span>
+                <span>Action</span>
+              </div>
 
-                  <div className="progress-track">
-                    <span style={{ width: `${state.percent}%` }} />
-                  </div>
+              {currentModels.map((model) => {
+                const state = modelStates[model.id];
+                const isLoaded = state.status === "loaded";
+                const isStreaming = state.status === "streaming";
+                const isActive = activeModelId === model.id;
+                const isBlocked = !model.url;
 
-                  <div className="row-footer">
-                    <span>
-                      {isBlocked
-                        ? "RVT source not streamable"
-                        : state.bytesLoaded
-                        ? `${formatBytes(state.bytesLoaded)} streamed`
-                        : "Ready to stream"}
-                    </span>
+                return (
+                  <article
+                    className={`model-table-row ${
+                      isActive ? "model-table-row-active" : ""
+                    } ${isBlocked ? "model-table-row-blocked" : ""}`}
+                    key={model.id}
+                  >
+                    <div className="model-identity">
+                      <div className="model-icon" aria-hidden="true">
+                        {state.status === "loaded" ? (
+                          <CircleCheck className="icon" />
+                        ) : state.status === "streaming" ? (
+                          <LoaderCircle className="icon spin" />
+                        ) : state.status === "error" || isBlocked ? (
+                          <TriangleAlert className="icon" />
+                        ) : (
+                          <Building2 className="icon" />
+                        )}
+                      </div>
+                      <div>
+                        <h3>{model.name}</h3>
+                        <p>{model.description}</p>
+                        <small>
+                          {model.size} · {model.sourceFormat}
+                        </small>
+                      </div>
+                    </div>
+
+                    <div className="model-status-cell">
+                      <span className={`status-badge status-${state.status}`}>
+                        {isBlocked ? "Blocked" : statusLabel(state.status)}
+                      </span>
+                      <div className="progress-track">
+                        <span style={{ width: `${state.percent}%` }} />
+                      </div>
+                      <small>
+                        {isBlocked
+                          ? "Not streamable"
+                          : state.bytesLoaded
+                            ? `${formatBytes(state.bytesLoaded)} streamed`
+                            : "Ready"}
+                      </small>
+                    </div>
+
                     <button
+                      className="row-action"
                       disabled={!isReady || isStreaming || isBlocked}
                       onClick={() =>
-                        isLoaded ? unloadModel(model) : loadModel(model)
+                        void (isLoaded ? unloadModel(model) : loadModel(model))
                       }
                       type="button"
                     >
@@ -514,18 +720,18 @@ export default function BimStreamer({
                             ? "Streaming"
                             : "Load"}
                     </button>
-                  </div>
 
-                  {state.error || model.disabledReason ? (
-                    <p className="error-text">
-                      {state.error ?? model.disabledReason}
-                    </p>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
-        </aside>
+                    {state.error || model.disabledReason ? (
+                      <p className="error-text">
+                        {state.error ?? model.disabledReason}
+                      </p>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </aside>
+        </section>
       </section>
     </main>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCw, Trash2, UserPlus, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type Role = "admin" | "user";
@@ -176,8 +177,11 @@ export default function AdminUsers({ getAuthToken }: AdminUsersProps) {
   return (
     <section className="admin-panel" aria-label="User management">
       <header>
-        <span>Admin</span>
-        <h2>User management</h2>
+        <div>
+          <span>Admin</span>
+          <h2>User management</h2>
+        </div>
+        <UsersRound className="icon" aria-hidden="true" />
       </header>
 
       <div className="invite-form">
@@ -201,6 +205,7 @@ export default function AdminUsers({ getAuthToken }: AdminUsersProps) {
           onClick={addUser}
           type="button"
         >
+          <UserPlus className="icon" aria-hidden="true" />
           Add
         </button>
       </div>
@@ -231,6 +236,11 @@ export default function AdminUsers({ getAuthToken }: AdminUsersProps) {
               onClick={() => void deleteUser(account.id)}
               type="button"
             >
+              {isBusy ? (
+                <RefreshCw className="icon spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="icon" aria-hidden="true" />
+              )}
               Remove
             </button>
           </article>

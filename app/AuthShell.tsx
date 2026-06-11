@@ -1,5 +1,6 @@
 "use client";
 
+import { LogIn, LogOut, UsersRound } from "lucide-react";
 import type { Session, User } from "@supabase/supabase-js";
 import { useCallback, useEffect, useState } from "react";
 import AdminUsers from "./AdminUsers";
@@ -66,6 +67,7 @@ function GoogleSignInButton() {
         onClick={() => void startGoogleSignIn()}
         type="button"
       >
+        <LogIn className="icon" aria-hidden="true" />
         {isStarting ? "Opening Google..." : "Continue with Google"}
       </button>
       {error ? <p className="error-text auth-error">{error}</p> : null}
@@ -100,6 +102,7 @@ function AccountErrorScreen({
         <h1>Account not enabled</h1>
         <p>{message}</p>
         <button className="google-sign-in" onClick={onSignOut} type="button">
+          <LogOut className="icon" aria-hidden="true" />
           Sign out
         </button>
       </section>
@@ -165,10 +168,12 @@ export function AuthControls({
             onClick={onToggleAdmin}
             type="button"
           >
+            <UsersRound className="icon" aria-hidden="true" />
             Users
           </button>
         ) : null}
         <button className="sign-out-button" onClick={onSignOut} type="button">
+          <LogOut className="icon" aria-hidden="true" />
           Sign out
         </button>
       </div>
