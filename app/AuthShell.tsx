@@ -5,6 +5,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { useCallback, useEffect, useState } from "react";
 import AdminUsers from "./AdminUsers";
 import BimStreamer from "./BimStreamer";
+import type { ProjectSetting } from "./ProjectSettings";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
 const APP_NAME = "Evercam Open";
@@ -171,8 +172,11 @@ export function AuthControls({
 export default function AuthShell() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [currentUserError, setCurrentUserError] = useState<string | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isProjectSettingsOpen, setIsProjectSettingsOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(!isSupabaseConfigured);
+  const [projectSettings, setProjectSettings] = useState<
+    Record<string, ProjectSetting>
+  >({});
   const [session, setSession] = useState<Session | null>(null);
 
   const getAuthToken = useCallback(
@@ -183,22 +187,24 @@ export default function AuthShell() {
   useEffect(() => {
     if (!supabase) return;
 
+    const client = supabase;
     let cancelled = false;
 
     const loadSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await client.auth.getSession();
       if (!cancelled) {
         setSession(data.session);
         setIsLoaded(true);
       }
     };
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setIsLoaded(true);
       if (!nextSession) {
         setCurrentUser(null);
-        setIsSettingsOpen(false);
+        setIsProjectSettingsOpen(false);
+        setProjectSettings({});
       }
     });
 
@@ -242,6 +248,38 @@ export default function AuthShell() {
       cancelled = true;
     };
   }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!session?.access_token || currentUser?.id !== session.user.id) return;
+
+    let cancelled = false;
+
+    const loadProjectSettings = async () => {
+      try {
+        const data = await fetchJson<{ projects: ProjectSetting[] }>(
+          "/api/projects",
+          session.access_token,
+        );
+        if (!cancelled) {
+          setProjectSettings(
+            Object.fromEntries(
+              data.projects.map((project) => [project.id, project]),
+            ),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setProjectSettings({});
+        }
+      }
+    };
+
+    void loadProjectSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, session?.access_token, session?.user.id]);
 
   const signOut = async () => {
     if (!supabase) return;
@@ -299,17 +337,25 @@ export default function AuthShell() {
             currentUser={verifiedCurrentUser ?? fallbackUser(session.user)}
             onSignOut={() => void signOut()}
           />
+          {canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null}
           {currentUserError ? (
             <p className="error-text auth-error">{currentUserError}</p>
           ) : null}
         </>
       }
+      canManageProjectSettings={canManageUsers}
       getAuthToken={getAuthToken}
-      isSettingsOpen={isSettingsOpen}
-      onSettingsToggle={() => setIsSettingsOpen((open) => !open)}
-      settingsSlot={
-        canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null
+      isProjectSettingsOpen={isProjectSettingsOpen}
+      onProjectNameSaved={(project) =>
+        setProjectSettings((current) => ({
+          ...current,
+          [project.id]: project,
+        }))
       }
+      onProjectSettingsToggle={() =>
+        setIsProjectSettingsOpen((open) => !open)
+      }
+      projectSettings={projectSettings}
     />
   );
 }

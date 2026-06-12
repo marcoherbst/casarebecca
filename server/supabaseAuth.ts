@@ -108,6 +108,14 @@ export function getRequestOrigin(req: ApiRequest) {
 }
 
 export function getUserIdFromPath(req: ApiRequest, segment: string) {
+  return getPathSegmentValue(req, segment, "User id is required.");
+}
+
+export function getPathSegmentValue(
+  req: ApiRequest,
+  segment: string,
+  message: string,
+) {
   const origin = getRequestOrigin(req);
   const pathname = new URL(req.url ?? "", origin).pathname;
   const parts = pathname.split("/").filter(Boolean);
@@ -115,7 +123,7 @@ export function getUserIdFromPath(req: ApiRequest, segment: string) {
   const value = index >= 0 ? parts[index + 1] : "";
 
   if (!value) {
-    throw new ApiError(400, "User id is required.");
+    throw new ApiError(400, message);
   }
 
   return decodeURIComponent(value);

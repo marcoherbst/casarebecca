@@ -30,6 +30,10 @@ only after Supabase verifies the signed-in user.
 The active protected project list lives in `modelCatalog.ts`. Each Drive IFC
 gets one project entry, with the IFC base filename used as the project name.
 
+Project display-name overrides are stored in Supabase in
+`public.project_settings`. Apply the migrations in `supabase/migrations/` when
+provisioning a new Supabase project.
+
 ## Authentication
 
 The Vercel build uses Supabase Auth for Google SSO and app-level roles.

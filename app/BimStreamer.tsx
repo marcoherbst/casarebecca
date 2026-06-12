@@ -30,6 +30,7 @@ import {
   useState,
 } from "react";
 import { PROTECTED_MODEL_CATALOG } from "../modelCatalog";
+import ProjectSettings, { type ProjectSetting } from "./ProjectSettings";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
@@ -69,11 +70,13 @@ type Runtime = {
 };
 
 type BimStreamerProps = {
+  canManageProjectSettings?: boolean;
   controlSlot?: ReactNode;
   getAuthToken?: () => Promise<string | null>;
-  isSettingsOpen?: boolean;
-  onSettingsToggle?: () => void;
-  settingsSlot?: ReactNode;
+  isProjectSettingsOpen?: boolean;
+  onProjectNameSaved?: (project: ProjectSetting) => void;
+  onProjectSettingsToggle?: () => void;
+  projectSettings?: Record<string, ProjectSetting>;
 };
 
 const DEMO_MODELS: DemoModel[] = [
@@ -120,6 +123,7 @@ const PROJECTION_LAYERS = {
 } as const;
 
 const APP_NAME = "Evercam Open";
+const EMPTY_PROJECT_SETTINGS: Record<string, ProjectSetting> = {};
 
 const PROJECTS: Array<{
   description: string;
@@ -255,11 +259,13 @@ async function streamModel(
 }
 
 export default function BimStreamer({
+  canManageProjectSettings = false,
   controlSlot,
   getAuthToken,
-  isSettingsOpen = false,
-  onSettingsToggle,
-  settingsSlot,
+  isProjectSettingsOpen = false,
+  onProjectNameSaved,
+  onProjectSettingsToggle,
+  projectSettings = EMPTY_PROJECT_SETTINGS,
 }: BimStreamerProps = {}) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<Runtime | null>(null);
@@ -278,9 +284,31 @@ export default function BimStreamer({
   const [isProjecting2D, setIsProjecting2D] = useState(false);
   const [projectionError, setProjectionError] = useState<string | null>(null);
 
+  const resolvedProjects = useMemo(
+    () =>
+      PROJECTS.map((project) => ({
+        ...project,
+        label: projectSettings[project.id]?.name ?? project.label,
+      })),
+    [projectSettings],
+  );
+
+  const resolvedModels = useMemo(
+    () =>
+      MODELS.map((model) =>
+        model.project === "demo"
+          ? model
+          : {
+              ...model,
+              name: projectSettings[model.project]?.name ?? model.name,
+            },
+      ),
+    [projectSettings],
+  );
+
   const currentModels = useMemo(
-    () => MODELS.filter((model) => model.project === activeProjectId),
-    [activeProjectId],
+    () => resolvedModels.filter((model) => model.project === activeProjectId),
+    [activeProjectId, resolvedModels],
   );
 
   const activeCount = useMemo(
@@ -291,7 +319,25 @@ export default function BimStreamer({
   );
 
   const activeModel = activeModelId
-    ? MODELS.find((model) => model.id === activeModelId)
+    ? resolvedModels.find((model) => model.id === activeModelId)
+    : null;
+
+  const activeProject = resolvedProjects.find(
+    (project) => project.id === activeProjectId,
+  );
+
+  const activeProjectDefault = PROJECTS.find(
+    (project) => project.id === activeProjectId,
+  );
+
+  const activeProjectSettings = activeProject
+    ? {
+        defaultName: activeProjectDefault?.label ?? activeProject.label,
+        id: activeProject.id,
+        name: activeProject.label,
+        updatedAt: projectSettings[activeProject.id]?.updatedAt ?? null,
+        updatedBy: projectSettings[activeProject.id]?.updatedBy ?? null,
+      }
     : null;
 
   const isStreamingAny = Object.values(modelStates).some(
@@ -313,6 +359,12 @@ export default function BimStreamer({
   const displayedStreamStatusClass = isProjecting2D
     ? "streaming"
     : streamStatus.toLowerCase().replace(" ", "-");
+  const canShowProjectSettings = Boolean(
+    canManageProjectSettings &&
+      getAuthToken &&
+      onProjectNameSaved &&
+      activeProjectSettings,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -741,7 +793,7 @@ export default function BimStreamer({
         <section className="sidebar-projects" aria-label="Projects">
           <span>Projects</span>
           <div className="project-list">
-            {PROJECTS.map((project) => (
+            {resolvedProjects.map((project) => (
               <button
                 aria-pressed={activeProjectId === project.id}
                 className="project-button"
@@ -776,7 +828,7 @@ export default function BimStreamer({
         aria-label="BIM dashboard"
       >
         <section
-          className={`project-grid${isSettingsOpen && settingsSlot ? " has-settings" : ""}`}
+          className={`project-grid${isProjectSettingsOpen && canShowProjectSettings ? " has-settings" : ""}`}
         >
           <section
             className="viewer-card"
@@ -786,7 +838,7 @@ export default function BimStreamer({
             <div className="viewer-toolbar">
               <div className="viewer-toolbar-title">
                 <span>Viewport</span>
-                <strong>{activeModel?.name ?? "Casa Rebecca"}</strong>
+                <strong>{activeModel?.name ?? activeProject?.label ?? APP_NAME}</strong>
               </div>
               <div className="viewer-toolbar-actions">
                 <button
@@ -813,13 +865,13 @@ export default function BimStreamer({
                     {is2DView ? "3D" : "2D"}
                   </span>
                 </button>
-                {settingsSlot ? (
+                {canShowProjectSettings ? (
                   <button
-                    aria-label="Settings"
-                    aria-pressed={isSettingsOpen}
+                    aria-label="Project settings"
+                    aria-pressed={isProjectSettingsOpen}
                     className="settings-toggle"
-                    onClick={onSettingsToggle}
-                    title="Settings"
+                    onClick={onProjectSettingsToggle}
+                    title="Project settings"
                     type="button"
                   >
                     <Settings className="icon" aria-hidden="true" />
@@ -853,9 +905,18 @@ export default function BimStreamer({
             </div>
           </section>
 
-          {isSettingsOpen && settingsSlot ? (
-            <section className="settings-panel" aria-label="Settings">
-              {settingsSlot}
+          {isProjectSettingsOpen &&
+          canShowProjectSettings &&
+          getAuthToken &&
+          onProjectNameSaved &&
+          activeProjectSettings ? (
+            <section className="settings-panel" aria-label="Project settings">
+              <ProjectSettings
+                getAuthToken={getAuthToken}
+                key={activeProjectSettings.id}
+                onSaved={onProjectNameSaved}
+                project={activeProjectSettings}
+              />
             </section>
           ) : null}
         </section>

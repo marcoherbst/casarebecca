@@ -148,6 +148,8 @@ input {
 
 .auth-panel span,
 .admin-panel header span,
+.project-settings-panel header span,
+.project-name-field span,
 .signed-in-user span,
 .viewer-toolbar span,
 .sidebar-brand span,
@@ -177,6 +179,7 @@ input {
 .view-mode-toggle,
 .sign-out-button,
 .invite-form button,
+.project-name-form button,
 .admin-user-row button {
   display: inline-flex;
   min-height: 36px;
@@ -423,6 +426,47 @@ input {
 }
 
 .invite-form button {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.project-settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.project-settings-panel header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-settings-panel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-name-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.project-name-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.project-name-form button {
+  min-width: 92px;
   background: var(--primary);
   color: var(--primary-foreground);
 }
@@ -779,7 +823,8 @@ button.project-button:hover:not(:disabled) {
   }
 
   .settings-panel .invite-form,
-  .settings-panel .admin-user-row {
+  .settings-panel .admin-user-row,
+  .project-name-form {
     grid-template-columns: 1fr;
   }
 }
