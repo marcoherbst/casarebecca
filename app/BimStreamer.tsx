@@ -35,6 +35,15 @@ import ProjectSettings, { type ProjectSetting } from "./ProjectSettings";
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
 type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
+type ViewMode = "2d" | "3d";
+type HistoryUpdateMode = "push" | "replace";
+
+type VectorRouteValue = [number, number, number];
+
+type CameraRouteState = {
+  position: VectorRouteValue;
+  target: VectorRouteValue;
+};
 
 type DemoModel = {
   description: string;
@@ -67,6 +76,25 @@ type Runtime = {
     renderer: SimpleRenderer;
     scene: SimpleScene;
   };
+};
+
+type CameraControlsRouteAdapter = {
+  getPosition?: (
+    out: THREE.Vector3,
+    receiveEndValue?: boolean,
+  ) => THREE.Vector3;
+  getTarget?: (
+    out: THREE.Vector3,
+    receiveEndValue?: boolean,
+  ) => THREE.Vector3;
+  toJSON?: () => string;
+};
+
+type BrowserRouteState = {
+  camera: CameraRouteState | null;
+  modelId: string | null;
+  projectId: ProjectId;
+  viewMode: ViewMode;
 };
 
 type BimStreamerProps = {
@@ -141,6 +169,172 @@ const PROJECTS: Array<{
     label: "Demo",
   },
 ];
+
+const DEFAULT_PROJECT_ID: ProjectId = "casa_rebecca";
+const DEFAULT_VIEW_MODE: ViewMode = "3d";
+const CAMERA_ROUTE_UPDATE_DELAY_MS = 400;
+const ROUTE_PARAMS = {
+  camera: "camera",
+  model: "model",
+  project: "project",
+  target: "target",
+  view: "view",
+} as const;
+
+function isProjectId(value: string | null): value is ProjectId {
+  return Boolean(value && PROJECTS.some((project) => project.id === value));
+}
+
+function getRouteModel(modelId: string | null) {
+  return modelId ? MODELS.find((model) => model.id === modelId) : undefined;
+}
+
+function getRouteModelId(modelId: string | null, projectId: ProjectId) {
+  const model = getRouteModel(modelId);
+  return model?.project === projectId ? model.id : null;
+}
+
+function parseVectorRouteValue(value: string | null): VectorRouteValue | null {
+  if (!value) return null;
+
+  const numbers = value.split(",").map((part) => Number(part));
+  if (numbers.length !== 3 || numbers.some((number) => !Number.isFinite(number))) {
+    return null;
+  }
+
+  return numbers as VectorRouteValue;
+}
+
+function serializeVectorRouteValue(value: VectorRouteValue) {
+  return value.map((number) => Number(number.toFixed(3))).join(",");
+}
+
+function parseRouteState(): BrowserRouteState {
+  const fallback: BrowserRouteState = {
+    camera: null,
+    modelId: null,
+    projectId: DEFAULT_PROJECT_ID,
+    viewMode: DEFAULT_VIEW_MODE,
+  };
+
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const routeProjectId = params.get(ROUTE_PARAMS.project);
+  const routeModel = getRouteModel(params.get(ROUTE_PARAMS.model));
+  const projectId = isProjectId(routeProjectId)
+    ? routeProjectId
+    : (routeModel?.project ?? DEFAULT_PROJECT_ID);
+  const position = parseVectorRouteValue(params.get(ROUTE_PARAMS.camera));
+  const target = parseVectorRouteValue(params.get(ROUTE_PARAMS.target));
+
+  return {
+    camera: position && target ? { position, target } : null,
+    modelId: getRouteModelId(routeModel?.id ?? null, projectId),
+    projectId,
+    viewMode: params.get(ROUTE_PARAMS.view) === "2d" ? "2d" : "3d",
+  };
+}
+
+function writeRouteState(
+  routeState: BrowserRouteState,
+  updateMode: HistoryUpdateMode,
+) {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(ROUTE_PARAMS.project, routeState.projectId);
+  url.searchParams.set(ROUTE_PARAMS.view, routeState.viewMode);
+
+  if (routeState.modelId) {
+    url.searchParams.set(ROUTE_PARAMS.model, routeState.modelId);
+  } else {
+    url.searchParams.delete(ROUTE_PARAMS.model);
+  }
+
+  if (routeState.camera) {
+    url.searchParams.set(
+      ROUTE_PARAMS.camera,
+      serializeVectorRouteValue(routeState.camera.position),
+    );
+    url.searchParams.set(
+      ROUTE_PARAMS.target,
+      serializeVectorRouteValue(routeState.camera.target),
+    );
+  } else {
+    url.searchParams.delete(ROUTE_PARAMS.camera);
+    url.searchParams.delete(ROUTE_PARAMS.target);
+  }
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextUrl === currentUrl) return;
+
+  if (updateMode === "push") {
+    window.history.pushState(routeState, "", nextUrl);
+  } else {
+    window.history.replaceState(routeState, "", nextUrl);
+  }
+}
+
+function isVectorRouteValue(value: unknown): value is VectorRouteValue {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((number) => typeof number === "number" && Number.isFinite(number))
+  );
+}
+
+function getCameraRouteState(
+  runtime: Runtime,
+  visibleModels: DemoModel[],
+): CameraRouteState {
+  const controls = runtime.world.camera.controls as CameraControlsRouteAdapter;
+  if (controls.getPosition && controls.getTarget) {
+    const position = controls.getPosition(new runtime.THREE.Vector3(), true);
+    const target = controls.getTarget(new runtime.THREE.Vector3(), true);
+
+    return {
+      position: [position.x, position.y, position.z],
+      target: [target.x, target.y, target.z],
+    };
+  }
+
+  try {
+    const serializedControls =
+      typeof controls.toJSON === "function" ? JSON.parse(controls.toJSON()) : null;
+
+    if (
+      serializedControls &&
+      isVectorRouteValue(serializedControls.position) &&
+      isVectorRouteValue(serializedControls.target)
+    ) {
+      return {
+        position: serializedControls.position,
+        target: serializedControls.target,
+      };
+    }
+  } catch {
+    // Fall through to the camera and model-bounds fallback.
+  }
+
+  const position = runtime.world.camera.three.position;
+  const target =
+    getProjectModelBounds(runtime, visibleModels)?.getCenter(
+      new runtime.THREE.Vector3(),
+    ) ??
+    new runtime.THREE.Vector3(
+      ...DEFAULT_CAMERA_VIEW.target,
+    );
+
+  return {
+    position: [position.x, position.y, position.z],
+    target: [target.x, target.y, target.z],
+  };
+}
 
 function getLoadedProjectModels(runtime: Runtime, models: DemoModel[]) {
   return models
@@ -273,16 +467,23 @@ export default function BimStreamer({
     projectId: ProjectId;
     requestId: number;
   } | null>(null);
+  const cameraRouteTimerRef = useRef<number | null>(null);
+  const routeWriteModeRef = useRef<HistoryUpdateMode>("replace");
+  const pendingRouteCameraRef = useRef<CameraRouteState | null>(null);
+  const pendingRouteViewModeRef = useRef<ViewMode | null>(null);
+  const suppressNextRouteWriteRef = useRef(false);
   const [isReady, setIsReady] = useState(false);
+  const [hasAppliedInitialRoute, setHasAppliedInitialRoute] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] =
-    useState<ProjectId>("casa_rebecca");
+    useState<ProjectId>(DEFAULT_PROJECT_ID);
   const [loadRequestId, setLoadRequestId] = useState(0);
   const [is2DView, setIs2DView] = useState(false);
   const [isProjecting2D, setIsProjecting2D] = useState(false);
   const [projectionError, setProjectionError] = useState<string | null>(null);
+  const [cameraRouteVersion, setCameraRouteVersion] = useState(0);
 
   const resolvedProjects = useMemo(
     () =>
@@ -366,6 +567,93 @@ export default function BimStreamer({
       activeProjectSettings,
   );
 
+  const queueCameraRouteUpdate = useCallback(() => {
+    if (typeof window === "undefined" || cameraRouteTimerRef.current) return;
+
+    cameraRouteTimerRef.current = window.setTimeout(() => {
+      cameraRouteTimerRef.current = null;
+      setCameraRouteVersion((version) => version + 1);
+    }, CAMERA_ROUTE_UPDATE_DELAY_MS);
+  }, []);
+
+  const commitCurrentRouteState = useCallback(
+    (updateMode: HistoryUpdateMode = "replace") => {
+      const runtime = runtimeRef.current;
+      const camera = runtime
+        ? getCameraRouteState(runtime, currentModels)
+        : pendingRouteCameraRef.current;
+      const modelId = getRouteModelId(activeModelId, activeProjectId);
+
+      writeRouteState(
+        {
+          camera,
+          modelId,
+          projectId: activeProjectId,
+          viewMode: is2DView ? "2d" : "3d",
+        },
+        updateMode,
+      );
+    },
+    [activeModelId, activeProjectId, currentModels, is2DView],
+  );
+
+  const applyRouteCamera = useCallback(async (camera: CameraRouteState) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    await runtime.world.camera.controls.setLookAt(
+      ...camera.position,
+      ...camera.target,
+      true,
+    );
+    runtime.fragments.core.update(true);
+  }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const routeState = parseRouteState();
+      suppressNextRouteWriteRef.current = true;
+      pendingRouteCameraRef.current = routeState.camera;
+      pendingRouteViewModeRef.current =
+        routeState.viewMode === "2d" ? "2d" : null;
+      setActiveModelId(routeState.modelId);
+      setActiveProjectId(routeState.projectId);
+      setLoadRequestId((requestId) => requestId + 1);
+      setHasAppliedInitialRoute(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!hasAppliedInitialRoute) return;
+
+    if (suppressNextRouteWriteRef.current) {
+      suppressNextRouteWriteRef.current = false;
+      return;
+    }
+
+    const updateMode = routeWriteModeRef.current;
+    routeWriteModeRef.current = "replace";
+    commitCurrentRouteState(updateMode);
+  }, [
+    activeModelId,
+    activeProjectId,
+    cameraRouteVersion,
+    commitCurrentRouteState,
+    hasAppliedInitialRoute,
+    is2DView,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (cameraRouteTimerRef.current) {
+        window.clearTimeout(cameraRouteTimerRef.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -406,9 +694,10 @@ export default function BimStreamer({
         const fragments = components.get(OBC.FragmentsManager);
         fragments.init(workerUrl);
 
-        world.camera.controls.addEventListener("update", () =>
-          fragments.core.update(),
-        );
+        world.camera.controls.addEventListener("update", () => {
+          fragments.core.update();
+          queueCameraRouteUpdate();
+        });
 
         fragments.list.onItemSet.add(({ value: model }) => {
           model.useCamera(world.camera.three);
@@ -441,6 +730,7 @@ export default function BimStreamer({
           world,
         };
         setIsReady(true);
+        queueCameraRouteUpdate();
       } catch (error) {
         setBootError(
           error instanceof Error ? error.message : "The BIM viewer failed.",
@@ -455,7 +745,7 @@ export default function BimStreamer({
       runtimeRef.current?.components.dispose();
       runtimeRef.current = null;
     };
-  }, []);
+  }, [queueCameraRouteUpdate]);
 
   const setModelState = useCallback(
     (id: string, update: Partial<ModelState>) => {
@@ -540,9 +830,16 @@ export default function BimStreamer({
   );
 
   const switchViewMode = useCallback(
-    async (nextIs2DView: boolean) => {
+    async (
+      nextIs2DView: boolean,
+      historyUpdateMode?: HistoryUpdateMode,
+    ) => {
       const runtime = runtimeRef.current;
       if (!runtime || isProjecting2D) return;
+
+      if (historyUpdateMode) {
+        routeWriteModeRef.current = historyUpdateMode;
+      }
 
       setProjectionError(null);
 
@@ -572,7 +869,6 @@ export default function BimStreamer({
           throw new Error("Load a model before switching to 2D.");
         }
 
-        setIs2DView(true);
         const bounds = getProjectModelBounds(runtime, currentModels);
         const center = bounds?.getCenter(new runtime.THREE.Vector3());
         const size = bounds?.getSize(new runtime.THREE.Vector3());
@@ -606,6 +902,7 @@ export default function BimStreamer({
         setProjectModelsVisible(runtime, currentModels, false);
         drawing.three.visible = true;
         runtime.fragments.core.update(true);
+        setIs2DView(true);
       } catch (error) {
         setProjectModelsVisible(runtime, currentModels, true);
         if (runtime.projectionDrawing) {
@@ -701,7 +998,7 @@ export default function BimStreamer({
     [clearProjectionDrawing, getAuthToken, modelStates, setModelState],
   );
 
-  const unloadAllModels = async () => {
+  const unloadAllModels = useCallback(async () => {
     const runtime = runtimeRef.current;
     if (runtime) {
       clearProjectionDrawing();
@@ -718,10 +1015,11 @@ export default function BimStreamer({
 
     setActiveModelId(null);
     setModelStates(initialModelState());
-  };
+  }, [clearProjectionDrawing]);
 
   const switchProject = async (project: ProjectId) => {
     if (project !== activeProjectId) {
+      routeWriteModeRef.current = "push";
       await unloadAllModels();
       setActiveProjectId(project);
     }
@@ -730,13 +1028,22 @@ export default function BimStreamer({
   };
 
   const loadAll = useCallback(async () => {
+    const preferredModelId = getRouteModelId(activeModelId, activeProjectId);
+
     for (const model of currentModels) {
       if (!model.url) continue;
       if (modelStates[model.id].status !== "loaded") {
         await loadModel(model);
       }
     }
-  }, [currentModels, loadModel, modelStates]);
+
+    if (
+      preferredModelId &&
+      currentModels.some((model) => model.id === preferredModelId)
+    ) {
+      setActiveModelId(preferredModelId);
+    }
+  }, [activeModelId, activeProjectId, currentModels, loadModel, modelStates]);
 
   useEffect(() => {
     if (!isReady) {
@@ -776,6 +1083,74 @@ export default function BimStreamer({
     loadRequestId,
     modelStates,
   ]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handlePopState = () => {
+      const routeState = parseRouteState();
+      suppressNextRouteWriteRef.current = true;
+      pendingRouteCameraRef.current = routeState.camera;
+      pendingRouteViewModeRef.current = routeState.viewMode;
+      setProjectionError(null);
+
+      const applyRouteProject = async () => {
+        if (routeState.projectId !== activeProjectId) {
+          await unloadAllModels();
+        }
+
+        setActiveModelId(routeState.modelId);
+        setActiveProjectId(routeState.projectId);
+        setLoadRequestId((requestId) => requestId + 1);
+      };
+
+      void applyRouteProject();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [activeProjectId, unloadAllModels]);
+
+  useEffect(() => {
+    const requestedViewMode = pendingRouteViewModeRef.current;
+    if (!requestedViewMode || !isReady || isProjecting2D) return;
+
+    if (requestedViewMode === "2d") {
+      if (is2DView) {
+        pendingRouteViewModeRef.current = null;
+        return;
+      }
+
+      if (!canToggle2D) return;
+
+      pendingRouteViewModeRef.current = null;
+      const timeoutId = window.setTimeout(() => {
+        void switchViewMode(true);
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    pendingRouteViewModeRef.current = null;
+    if (is2DView) {
+      const timeoutId = window.setTimeout(() => {
+        void switchViewMode(false);
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+  }, [canToggle2D, is2DView, isProjecting2D, isReady, switchViewMode]);
+
+  useEffect(() => {
+    const camera = pendingRouteCameraRef.current;
+    if (!camera || !isReady) return;
+    if (pendingRouteViewModeRef.current === "2d" && !is2DView) return;
+
+    pendingRouteCameraRef.current = null;
+    const timeoutId = window.setTimeout(() => {
+      void applyRouteCamera(camera);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeCount, activeProjectId, applyRouteCamera, is2DView, isReady]);
 
   return (
     <main className="dashboard-app">
@@ -850,7 +1225,7 @@ export default function BimStreamer({
                   aria-pressed={is2DView}
                   className="view-mode-toggle"
                   disabled={!canToggle2D || isProjecting2D}
-                  onClick={() => void switchViewMode(!is2DView)}
+                  onClick={() => void switchViewMode(!is2DView, "push")}
                   title={is2DView ? "3D view" : "2D projection view"}
                   type="button"
                 >
