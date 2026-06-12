@@ -1209,8 +1209,7 @@ export default function BimStreamer({
             <Building2 className="icon" />
           </div>
           <div>
-            <span>Evercam BIM</span>
-            <strong>{APP_NAME}</strong>
+            <span>Evercam Open</span>
           </div>
         </div>
 
