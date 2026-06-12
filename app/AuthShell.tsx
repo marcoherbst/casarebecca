@@ -337,11 +337,13 @@ export default function AuthShell() {
             currentUser={verifiedCurrentUser ?? fallbackUser(session.user)}
             onSignOut={() => void signOut()}
           />
-          {canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null}
           {currentUserError ? (
             <p className="error-text auth-error">{currentUserError}</p>
           ) : null}
         </>
+      }
+      applicationSettingsSlot={
+        canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null
       }
       canManageProjectSettings={canManageUsers}
       getAuthToken={getAuthToken}

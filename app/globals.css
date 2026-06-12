@@ -561,6 +561,10 @@ button.project-button:hover:not(:disabled) {
   min-height: 0;
 }
 
+.project-grid.is-background {
+  display: none;
+}
+
 .project-grid.has-settings {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
 }
@@ -655,6 +659,66 @@ button.project-button:hover:not(:disabled) {
 .settings-panel .admin-user-row {
   grid-template-columns: minmax(0, 1fr) 112px auto;
   align-items: center;
+}
+
+.application-settings-view {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+  gap: 18px;
+}
+
+.application-settings-view .admin-panel {
+  max-height: none;
+  gap: 18px;
+  overflow: visible;
+  padding: 18px;
+}
+
+.application-settings-view .admin-panel header {
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.application-settings-view .admin-panel h2 {
+  font-size: 1.22rem;
+}
+
+.application-settings-view .invite-form {
+  grid-template-columns: minmax(240px, 1fr) 140px auto;
+  max-width: 820px;
+  align-items: center;
+}
+
+.application-settings-view .admin-user-list {
+  overflow: hidden;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.application-settings-view .admin-user-row {
+  grid-template-columns: minmax(0, 1fr) 128px auto;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--card);
+  padding: 14px;
+}
+
+.application-settings-view .admin-user-row:last-child {
+  border-bottom: 0;
+}
+
+.application-settings-view .invitation-list {
+  max-width: 820px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
 }
 
 .viewer-state {
@@ -824,6 +888,8 @@ button.project-button:hover:not(:disabled) {
 
   .settings-panel .invite-form,
   .settings-panel .admin-user-row,
+  .application-settings-view .invite-form,
+  .application-settings-view .admin-user-row,
   .project-name-form {
     grid-template-columns: 1fr;
   }

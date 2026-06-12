@@ -8,6 +8,7 @@ import {
   Settings,
   SquareStack,
   TriangleAlert,
+  UsersRound,
 } from "lucide-react";
 import type {
   FragmentsManager,
@@ -35,6 +36,7 @@ import ProjectSettings, { type ProjectSetting } from "./ProjectSettings";
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
 type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
+type DashboardSection = "application-settings" | "viewer";
 type ViewMode = "2d" | "3d";
 type HistoryUpdateMode = "push" | "replace";
 
@@ -94,10 +96,12 @@ type BrowserRouteState = {
   camera: CameraRouteState | null;
   modelId: string | null;
   projectId: ProjectId;
+  section: DashboardSection;
   viewMode: ViewMode;
 };
 
 type BimStreamerProps = {
+  applicationSettingsSlot?: ReactNode;
   canManageProjectSettings?: boolean;
   controlSlot?: ReactNode;
   getAuthToken?: () => Promise<string | null>;
@@ -177,6 +181,7 @@ const ROUTE_PARAMS = {
   camera: "camera",
   model: "model",
   project: "project",
+  section: "section",
   target: "target",
   view: "view",
 } as const;
@@ -214,6 +219,7 @@ function parseRouteState(): BrowserRouteState {
     camera: null,
     modelId: null,
     projectId: DEFAULT_PROJECT_ID,
+    section: "viewer",
     viewMode: DEFAULT_VIEW_MODE,
   };
 
@@ -234,6 +240,10 @@ function parseRouteState(): BrowserRouteState {
     camera: position && target ? { position, target } : null,
     modelId: getRouteModelId(routeModel?.id ?? null, projectId),
     projectId,
+    section:
+      params.get(ROUTE_PARAMS.section) === "application-settings"
+        ? "application-settings"
+        : "viewer",
     viewMode: params.get(ROUTE_PARAMS.view) === "2d" ? "2d" : "3d",
   };
 }
@@ -247,6 +257,12 @@ function writeRouteState(
   const url = new URL(window.location.href);
   url.searchParams.set(ROUTE_PARAMS.project, routeState.projectId);
   url.searchParams.set(ROUTE_PARAMS.view, routeState.viewMode);
+
+  if (routeState.section === "application-settings") {
+    url.searchParams.set(ROUTE_PARAMS.section, routeState.section);
+  } else {
+    url.searchParams.delete(ROUTE_PARAMS.section);
+  }
 
   if (routeState.modelId) {
     url.searchParams.set(ROUTE_PARAMS.model, routeState.modelId);
@@ -453,6 +469,7 @@ async function streamModel(
 }
 
 export default function BimStreamer({
+  applicationSettingsSlot,
   canManageProjectSettings = false,
   controlSlot,
   getAuthToken,
@@ -472,9 +489,12 @@ export default function BimStreamer({
   const pendingRouteCameraRef = useRef<CameraRouteState | null>(null);
   const pendingRouteViewModeRef = useRef<ViewMode | null>(null);
   const suppressNextRouteWriteRef = useRef(false);
+  const canShowApplicationSettings = Boolean(applicationSettingsSlot);
   const [isReady, setIsReady] = useState(false);
   const [hasAppliedInitialRoute, setHasAppliedInitialRoute] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] =
+    useState<DashboardSection>("viewer");
   const [modelStates, setModelStates] = useState(initialModelState);
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] =
@@ -589,12 +609,13 @@ export default function BimStreamer({
           camera,
           modelId,
           projectId: activeProjectId,
+          section: activeSection,
           viewMode: is2DView ? "2d" : "3d",
         },
         updateMode,
       );
     },
-    [activeModelId, activeProjectId, currentModels, is2DView],
+    [activeModelId, activeProjectId, activeSection, currentModels, is2DView],
   );
 
   const applyRouteCamera = useCallback(async (camera: CameraRouteState) => {
@@ -618,12 +639,18 @@ export default function BimStreamer({
         routeState.viewMode === "2d" ? "2d" : null;
       setActiveModelId(routeState.modelId);
       setActiveProjectId(routeState.projectId);
+      setActiveSection(
+        routeState.section === "application-settings" &&
+          canShowApplicationSettings
+          ? "application-settings"
+          : "viewer",
+      );
       setLoadRequestId((requestId) => requestId + 1);
       setHasAppliedInitialRoute(true);
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, []);
+  }, [canShowApplicationSettings]);
 
   useEffect(() => {
     if (!hasAppliedInitialRoute) return;
@@ -639,6 +666,7 @@ export default function BimStreamer({
   }, [
     activeModelId,
     activeProjectId,
+    activeSection,
     cameraRouteVersion,
     commitCurrentRouteState,
     hasAppliedInitialRoute,
@@ -1018,13 +1046,28 @@ export default function BimStreamer({
   }, [clearProjectionDrawing]);
 
   const switchProject = async (project: ProjectId) => {
-    if (project !== activeProjectId) {
+    if (project !== activeProjectId || activeSection !== "viewer") {
       routeWriteModeRef.current = "push";
+    }
+
+    setActiveSection("viewer");
+
+    if (project !== activeProjectId) {
       await unloadAllModels();
       setActiveProjectId(project);
     }
 
     setLoadRequestId((requestId) => requestId + 1);
+  };
+
+  const openApplicationSettings = () => {
+    if (!canShowApplicationSettings) return;
+
+    routeWriteModeRef.current = "push";
+    if (isProjectSettingsOpen) {
+      onProjectSettingsToggle?.();
+    }
+    setActiveSection("application-settings");
   };
 
   const loadAll = useCallback(async () => {
@@ -1101,6 +1144,12 @@ export default function BimStreamer({
 
         setActiveModelId(routeState.modelId);
         setActiveProjectId(routeState.projectId);
+        setActiveSection(
+          routeState.section === "application-settings" &&
+            canShowApplicationSettings
+            ? "application-settings"
+            : "viewer",
+        );
         setLoadRequestId((requestId) => requestId + 1);
       };
 
@@ -1109,7 +1158,7 @@ export default function BimStreamer({
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [activeProjectId, unloadAllModels]);
+  }, [activeProjectId, canShowApplicationSettings, unloadAllModels]);
 
   useEffect(() => {
     const requestedViewMode = pendingRouteViewModeRef.current;
@@ -1190,6 +1239,27 @@ export default function BimStreamer({
           </div>
         </section>
 
+        {canShowApplicationSettings ? (
+          <section
+            className="sidebar-projects sidebar-admin"
+            aria-label="Administration"
+          >
+            <span>Admin</span>
+            <button
+              aria-pressed={activeSection === "application-settings"}
+              className="project-button"
+              onClick={openApplicationSettings}
+              type="button"
+            >
+              <UsersRound className="icon" aria-hidden="true" />
+              <span>
+                <strong>Application settings</strong>
+                <small>Users and access</small>
+              </span>
+            </button>
+          </section>
+        ) : null}
+
         <div className="sidebar-footer" id="access-controls">
           {controlSlot ? (
             <div className="control-slot">{controlSlot}</div>
@@ -1203,7 +1273,8 @@ export default function BimStreamer({
         aria-label="BIM dashboard"
       >
         <section
-          className={`project-grid${isProjectSettingsOpen && canShowProjectSettings ? " has-settings" : ""}`}
+          aria-hidden={activeSection !== "viewer"}
+          className={`project-grid${isProjectSettingsOpen && canShowProjectSettings ? " has-settings" : ""}${activeSection === "viewer" ? "" : " is-background"}`}
         >
           <section
             className="viewer-card"
@@ -1295,6 +1366,15 @@ export default function BimStreamer({
             </section>
           ) : null}
         </section>
+
+        {activeSection === "application-settings" && applicationSettingsSlot ? (
+          <section
+            className="application-settings-view"
+            aria-label="Application settings"
+          >
+            {applicationSettingsSlot}
+          </section>
+        ) : null}
       </section>
     </main>
   );
