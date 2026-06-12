@@ -9,7 +9,7 @@ export type ProtectedModelEntry = {
 
 export const PROTECTED_MODEL_CATALOG = [
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "casa_rebecca.frag",
     id: "casa_rebecca",
     projectName: "Casa Rebecca",
@@ -17,7 +17,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Casa Rebecca.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "siobhan_house.frag",
     id: "siobhan_house",
     projectName: "siobhan house",
@@ -25,7 +25,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "siobhan house.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "kilpoole.frag",
     id: "kilpoole",
     projectName: "Kilpoole",
@@ -33,7 +33,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Kilpoole.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "evercam_wicklow.frag",
     id: "evercam_wicklow",
     projectName: "Evercam Wicklow",
@@ -41,7 +41,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Evercam Wicklow.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "evercam_berlin.frag",
     id: "evercam_berlin",
     projectName: "Evercam Berlin",
@@ -49,7 +49,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Evercam Berlin.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "evercam_usa.frag",
     id: "evercam_usa",
     projectName: "Evercam USA",
@@ -57,7 +57,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Evercam USA.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "aughrim.frag",
     id: "aughrim",
     projectName: "Aughrim",
@@ -65,7 +65,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Aughrim.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "polo_wicklow_1.frag",
     id: "polo_wicklow_1",
     projectName: "Polo Wicklow (1)",
@@ -73,7 +73,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Polo Wicklow (1).ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "herbst_house_detache.frag",
     id: "herbst_house_detache",
     projectName: "Herbst House_détaché",
@@ -81,7 +81,7 @@ export const PROTECTED_MODEL_CATALOG = [
     sourceFileName: "Herbst House_détaché.ifc",
   },
   {
-    description: "IFC source from Drive",
+    description: "",
     fragmentFileName: "pink_house_1_1.frag",
     id: "pink_house_1_1",
     projectName: "Pink house (1) (1)",

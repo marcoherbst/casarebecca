@@ -756,7 +756,7 @@ export default function BimStreamer({
                 )}
                 <span>
                   <strong>{project.label}</strong>
-                  <small>{project.description}</small>
+                  {project.description ? <small>{project.description}</small> : null}
                 </span>
               </button>
             ))}
