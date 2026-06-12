@@ -1,4 +1,4 @@
-# Casa Rebecca BIM Streamer
+# Evercam Open
 
 A Codex Sites demo app that hosts ThatOpen Fragment BIM files and streams them
 into a browser-based 3D viewer.
@@ -10,7 +10,7 @@ into a browser-based 3D viewer.
 - Streams each file with byte progress in the UI
 - Loads the streamed buffers into `@thatopen/components` `FragmentsManager`
 - Shows architecture and structure models as separate BIM disciplines
-- Lets you switch between Casa Rebecca, the other Drive projects, and the demo set
+- Lets you switch between the Drive projects and the demo set
 
 The bundled sample files come from ThatOpen's public fragment demo resources:
 

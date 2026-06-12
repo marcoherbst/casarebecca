@@ -119,6 +119,8 @@ const PROJECTION_LAYERS = {
   visible: "projection-visible",
 } as const;
 
+const APP_NAME = "Evercam Open";
+
 const PROJECTS: Array<{
   description: string;
   id: ProjectId;
@@ -732,7 +734,7 @@ export default function BimStreamer({
           </div>
           <div>
             <span>Evercam BIM</span>
-            <strong>Casa Rebecca</strong>
+            <strong>{APP_NAME}</strong>
           </div>
         </div>
 

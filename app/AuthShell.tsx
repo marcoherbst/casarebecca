@@ -7,6 +7,8 @@ import AdminUsers from "./AdminUsers";
 import BimStreamer from "./BimStreamer";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
+const APP_NAME = "Evercam Open";
+
 type Role = "admin" | "user";
 
 type CurrentUser = {
@@ -79,7 +81,7 @@ function SignInScreen() {
   return (
     <main className="auth-screen">
       <section className="auth-panel" aria-label="Sign in">
-        <span>Casa Rebecca</span>
+        <span>{APP_NAME}</span>
         <h1>BIM file streamer</h1>
         <p>Google SSO is required for access.</p>
         <GoogleSignInButton />
@@ -254,7 +256,7 @@ export default function AuthShell() {
     return (
       <main className="auth-screen">
         <section className="auth-panel" aria-label="Loading authentication">
-          <span>Casa Rebecca</span>
+          <span>{APP_NAME}</span>
           <h1>Checking session</h1>
         </section>
       </main>
@@ -282,7 +284,7 @@ export default function AuthShell() {
     return (
       <main className="auth-screen">
         <section className="auth-panel" aria-label="Loading account">
-          <span>Casa Rebecca</span>
+          <span>{APP_NAME}</span>
           <h1>Checking access</h1>
         </section>
       </main>

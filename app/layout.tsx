@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Casa Rebecca BIM Streamer",
+  title: "Evercam Open",
   description: "A ThatOpen BIM fragment streaming demo.",
   icons: {
     icon: "/favicon.svg",
