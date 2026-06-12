@@ -1,12 +1,26 @@
 "use client";
 
 import {
+  Box,
   Building2,
   Layers3,
   LoaderCircle,
   Settings,
+  SquareStack,
   TriangleAlert,
 } from "lucide-react";
+import type {
+  FragmentsManager,
+  ModelIdMap,
+  OrthoPerspectiveCamera,
+  SimpleRenderer,
+  SimpleScene,
+  TechnicalDrawing,
+  TechnicalDrawings,
+  World,
+} from "@thatopen/components";
+import type { FragmentsModel } from "@thatopen/fragments";
+import type * as THREE from "three";
 import {
   type ReactNode,
   useCallback,
@@ -41,17 +55,16 @@ type ModelState = {
 };
 
 type Runtime = {
-  components: { dispose: () => void };
-  fragments: {
-    core: {
-      disposeModel: (modelId: string) => Promise<void> | void;
-      load: (
-        buffer: ArrayBuffer,
-        options: { modelId: string },
-      ) => Promise<unknown>;
-      update: (force?: boolean) => void;
-    };
-    list: Map<string, unknown>;
+  OBC: typeof import("@thatopen/components");
+  THREE: typeof import("three");
+  components: { dispose: () => void; get: <T>(component: unknown) => T };
+  fragments: FragmentsManager;
+  projectionDrawing: TechnicalDrawing | null;
+  projectionKey: string | null;
+  world: World & {
+    camera: OrthoPerspectiveCamera;
+    renderer: SimpleRenderer;
+    scene: SimpleScene;
   };
 };
 
@@ -96,6 +109,16 @@ const PROTECTED_MODELS: DemoModel[] = PROTECTED_MODEL_CATALOG.map((model) => ({
 
 const MODELS: DemoModel[] = [...PROTECTED_MODELS, ...DEMO_MODELS];
 
+const DEFAULT_CAMERA_VIEW = {
+  position: [58, 22, -25],
+  target: [13, 0, 4.2],
+} as const;
+
+const PROJECTION_LAYERS = {
+  hidden: "projection-hidden",
+  visible: "projection-visible",
+} as const;
+
 const PROJECTS: Array<{
   description: string;
   id: ProjectId;
@@ -112,6 +135,70 @@ const PROJECTS: Array<{
     label: "Demo",
   },
 ];
+
+function getLoadedProjectModels(runtime: Runtime, models: DemoModel[]) {
+  return models
+    .map((model) => runtime.fragments.list.get(model.id))
+    .filter((model): model is FragmentsModel => Boolean(model));
+}
+
+function getLoadedModelIds(runtime: Runtime, models: DemoModel[]) {
+  return models
+    .filter((model) => runtime.fragments.list.has(model.id))
+    .map((model) => model.id)
+    .sort();
+}
+
+function setProjectModelsVisible(
+  runtime: Runtime,
+  models: DemoModel[],
+  visible: boolean,
+) {
+  for (const model of getLoadedProjectModels(runtime, models)) {
+    model.object.visible = visible;
+  }
+
+  runtime.fragments.core.update(true);
+}
+
+function getProjectModelBounds(runtime: Runtime, models: DemoModel[]) {
+  const bounds = new runtime.THREE.Box3();
+
+  for (const model of getLoadedProjectModels(runtime, models)) {
+    model.object.updateWorldMatrix(true, true);
+    bounds.expandByObject(model.object);
+  }
+
+  return bounds.isEmpty() ? null : bounds;
+}
+
+function collectProjectMeshes(runtime: Runtime, models: DemoModel[]) {
+  const meshes: THREE.Mesh[] = [];
+
+  for (const model of getLoadedProjectModels(runtime, models)) {
+    model.object.traverse((object) => {
+      if ((object as THREE.Mesh).isMesh) {
+        meshes.push(object as THREE.Mesh);
+      }
+    });
+  }
+
+  return meshes;
+}
+
+async function getProjectModelIdMap(runtime: Runtime, models: DemoModel[]) {
+  const modelIdMap: ModelIdMap = {};
+
+  for (const model of models) {
+    const fragmentModel = runtime.fragments.list.get(model.id);
+    if (!fragmentModel) continue;
+
+    const localIds = await fragmentModel.getItemsIdsWithGeometry();
+    modelIdMap[model.id] = new Set(localIds);
+  }
+
+  return modelIdMap;
+}
 
 const initialModelState = (): Record<string, ModelState> =>
   Object.fromEntries(
@@ -185,6 +272,9 @@ export default function BimStreamer({
   const [activeProjectId, setActiveProjectId] =
     useState<ProjectId>("casa_rebecca");
   const [loadRequestId, setLoadRequestId] = useState(0);
+  const [is2DView, setIs2DView] = useState(false);
+  const [isProjecting2D, setIsProjecting2D] = useState(false);
+  const [projectionError, setProjectionError] = useState<string | null>(null);
 
   const currentModels = useMemo(
     () => MODELS.filter((model) => model.project === activeProjectId),
@@ -216,6 +306,12 @@ export default function BimStreamer({
         ? "Ready"
         : "Idle";
 
+  const canToggle2D = isReady && activeCount > 0 && !isStreamingAny;
+  const displayedStreamStatus = isProjecting2D ? "Projecting 2D" : streamStatus;
+  const displayedStreamStatusClass = isProjecting2D
+    ? "streaming"
+    : streamStatus.toLowerCase().replace(" ", "-");
+
   useEffect(() => {
     let cancelled = false;
 
@@ -244,7 +340,10 @@ export default function BimStreamer({
         });
         world.renderer.showLogo = false;
         world.camera = new OBC.OrthoPerspectiveCamera(components);
-        await world.camera.controls.setLookAt(58, 22, -25, 13, 0, 4.2);
+        await world.camera.controls.setLookAt(
+          ...DEFAULT_CAMERA_VIEW.position,
+          ...DEFAULT_CAMERA_VIEW.target,
+        );
 
         components.init();
         components.get(OBC.Grids).create(world);
@@ -278,7 +377,15 @@ export default function BimStreamer({
           return;
         }
 
-        runtimeRef.current = { components, fragments };
+        runtimeRef.current = {
+          OBC,
+          THREE,
+          components,
+          fragments,
+          projectionDrawing: null,
+          projectionKey: null,
+          world,
+        };
         setIsReady(true);
       } catch (error) {
         setBootError(
@@ -309,10 +416,175 @@ export default function BimStreamer({
     [],
   );
 
+  const clearProjectionDrawing = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    runtime.projectionDrawing?.dispose();
+    runtime.projectionDrawing = null;
+    runtime.projectionKey = null;
+  }, []);
+
+  const ensureProjectionDrawing = useCallback(
+    async (runtime: Runtime) => {
+      const loadedModelIds = getLoadedModelIds(runtime, currentModels);
+      if (!loadedModelIds.length) {
+        throw new Error("Load a model before switching to 2D.");
+      }
+
+      const projectionKey = loadedModelIds.join("|");
+      const bounds = getProjectModelBounds(runtime, currentModels);
+      if (runtime.projectionDrawing && runtime.projectionKey === projectionKey) {
+        return { bounds, drawing: runtime.projectionDrawing };
+      }
+
+      runtime.projectionDrawing?.dispose();
+      runtime.projectionDrawing = null;
+      runtime.projectionKey = null;
+
+      const drawing = runtime.components
+        .get<TechnicalDrawings>(runtime.OBC.TechnicalDrawings)
+        .create(runtime.world);
+      drawing.three.visible = false;
+      drawing.orientTo(new runtime.THREE.Vector3(0, -1, 0));
+
+      if (bounds) {
+        const center = bounds.getCenter(new runtime.THREE.Vector3());
+        const size = bounds.getSize(new runtime.THREE.Vector3());
+        const topMargin = Math.max(size.y * 0.06, 0.5);
+        drawing.three.position.set(center.x, bounds.max.y + topMargin, center.z);
+        drawing.far = Math.max(size.y + topMargin * 2, 20);
+      }
+
+      drawing.layers.create(PROJECTION_LAYERS.visible, {
+        material: new runtime.THREE.LineBasicMaterial({
+          color: 0x17211d,
+          depthTest: false,
+        }),
+      });
+      drawing.layers.create(PROJECTION_LAYERS.hidden, {
+        material: new runtime.THREE.LineBasicMaterial({
+          color: 0x8a8f98,
+          depthTest: false,
+          opacity: 0.36,
+          transparent: true,
+        }),
+      });
+
+      await drawing.addProjectionFromItems(
+        await getProjectModelIdMap(runtime, currentModels),
+        {
+          layers: PROJECTION_LAYERS,
+        },
+      );
+
+      runtime.projectionDrawing = drawing;
+      runtime.projectionKey = projectionKey;
+      return { bounds, drawing };
+    },
+    [currentModels],
+  );
+
+  const switchViewMode = useCallback(
+    async (nextIs2DView: boolean) => {
+      const runtime = runtimeRef.current;
+      if (!runtime || isProjecting2D) return;
+
+      setProjectionError(null);
+
+      if (!nextIs2DView) {
+        setProjectModelsVisible(runtime, currentModels, true);
+        if (runtime.projectionDrawing) {
+          runtime.projectionDrawing.three.visible = false;
+        }
+
+        runtime.world.camera.set("Orbit");
+        await runtime.world.camera.projection.set("Perspective");
+        await runtime.world.camera.controls.setLookAt(
+          ...DEFAULT_CAMERA_VIEW.position,
+          ...DEFAULT_CAMERA_VIEW.target,
+          true,
+        );
+        runtime.fragments.core.update(true);
+        setIs2DView(false);
+        return;
+      }
+
+      setIsProjecting2D(true);
+
+      try {
+        const loadedModelIds = getLoadedModelIds(runtime, currentModels);
+        if (!loadedModelIds.length) {
+          throw new Error("Load a model before switching to 2D.");
+        }
+
+        setIs2DView(true);
+        const bounds = getProjectModelBounds(runtime, currentModels);
+        const center = bounds?.getCenter(new runtime.THREE.Vector3());
+        const size = bounds?.getSize(new runtime.THREE.Vector3());
+        const viewSize = size ? Math.max(size.x, size.y, size.z, 24) : 40;
+
+        setProjectModelsVisible(runtime, currentModels, true);
+        if (runtime.projectionDrawing) {
+          runtime.projectionDrawing.three.visible = false;
+        }
+
+        await runtime.world.camera.projection.set("Orthographic");
+        runtime.world.camera.set("Plan");
+        if (center) {
+          await runtime.world.camera.controls.setLookAt(
+            center.x,
+            center.y + viewSize * 1.75,
+            center.z,
+            center.x,
+            center.y,
+            center.z,
+            true,
+          );
+        }
+
+        const meshes = collectProjectMeshes(runtime, currentModels);
+        if (meshes.length) {
+          await runtime.world.camera.fit(meshes, 1.25);
+        }
+
+        const { drawing } = await ensureProjectionDrawing(runtime);
+        setProjectModelsVisible(runtime, currentModels, false);
+        drawing.three.visible = true;
+        runtime.fragments.core.update(true);
+      } catch (error) {
+        setProjectModelsVisible(runtime, currentModels, true);
+        if (runtime.projectionDrawing) {
+          runtime.projectionDrawing.three.visible = false;
+        }
+        runtime.world.camera.set("Orbit");
+        await runtime.world.camera.projection.set("Perspective");
+        await runtime.world.camera.controls.setLookAt(
+          ...DEFAULT_CAMERA_VIEW.position,
+          ...DEFAULT_CAMERA_VIEW.target,
+          true,
+        );
+        setProjectionError(
+          error instanceof Error
+            ? error.message
+            : "The 2D projection could not be generated.",
+        );
+        setIs2DView(false);
+      } finally {
+        setIsProjecting2D(false);
+      }
+    },
+    [currentModels, ensureProjectionDrawing, isProjecting2D],
+  );
+
   const loadModel = useCallback(
     async (model: DemoModel) => {
       const runtime = runtimeRef.current;
       if (!runtime || modelStates[model.id].status === "streaming") return;
+      clearProjectionDrawing();
+      setIs2DView(false);
+      setProjectionError(null);
+
       if (!model.url) {
         setActiveModelId(model.id);
         setModelState(model.id, {
@@ -372,12 +644,16 @@ export default function BimStreamer({
         });
       }
     },
-    [getAuthToken, modelStates, setModelState],
+    [clearProjectionDrawing, getAuthToken, modelStates, setModelState],
   );
 
   const unloadAllModels = async () => {
     const runtime = runtimeRef.current;
     if (runtime) {
+      clearProjectionDrawing();
+      setIs2DView(false);
+      setProjectionError(null);
+
       for (const model of MODELS) {
         if (runtime.fragments.list.has(model.id)) {
           await runtime.fragments.core.disposeModel(model.id);
@@ -511,6 +787,30 @@ export default function BimStreamer({
                 <strong>{activeModel?.name ?? "Casa Rebecca"}</strong>
               </div>
               <div className="viewer-toolbar-actions">
+                <button
+                  aria-label={
+                    is2DView
+                      ? "Switch to 3D view"
+                      : "Switch to 2D projection view"
+                  }
+                  aria-pressed={is2DView}
+                  className="view-mode-toggle"
+                  disabled={!canToggle2D || isProjecting2D}
+                  onClick={() => void switchViewMode(!is2DView)}
+                  title={is2DView ? "3D view" : "2D projection view"}
+                  type="button"
+                >
+                  {isProjecting2D ? (
+                    <LoaderCircle className="icon spin" aria-hidden="true" />
+                  ) : is2DView ? (
+                    <Box className="icon" aria-hidden="true" />
+                  ) : (
+                    <SquareStack className="icon" aria-hidden="true" />
+                  )}
+                  <span className="view-mode-label">
+                    {is2DView ? "3D" : "2D"}
+                  </span>
+                </button>
                 {settingsSlot ? (
                   <button
                     aria-label="Settings"
@@ -524,9 +824,9 @@ export default function BimStreamer({
                   </button>
                 ) : null}
                 <span
-                  className={`status-badge status-${streamStatus.toLowerCase().replace(" ", "-")}`}
+                  className={`status-badge status-${displayedStreamStatusClass}`}
                 >
-                  {streamStatus}
+                  {displayedStreamStatus}
                 </span>
               </div>
             </div>
@@ -540,6 +840,12 @@ export default function BimStreamer({
                     <LoaderCircle className="icon-lg spin" aria-hidden="true" />
                   )}
                   <span>{bootError ?? "Starting ThatOpen viewer..."}</span>
+                </div>
+              ) : null}
+              {projectionError ? (
+                <div className="viewer-alert" role="status">
+                  <TriangleAlert className="icon" aria-hidden="true" />
+                  <span>{projectionError}</span>
                 </div>
               ) : null}
             </div>
