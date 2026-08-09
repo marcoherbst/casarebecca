@@ -3,6 +3,7 @@
 import {
   Box,
   Building2,
+  GitBranch,
   Layers3,
   LoaderCircle,
   Settings,
@@ -1263,6 +1264,13 @@ export default function BimStreamer({
           {controlSlot ? (
             <div className="control-slot">{controlSlot}</div>
           ) : null}
+          <div className="sidebar-git-info" title="Current build branch and commit">
+            <GitBranch className="icon" aria-hidden="true" />
+            <span>
+              <strong>{process.env.NEXT_PUBLIC_GIT_BRANCH || "main"}</strong>
+              <small>{process.env.NEXT_PUBLIC_GIT_COMMIT_SHA || "dev"}</small>
+            </span>
+          </div>
         </div>
       </aside>
 
