@@ -3,15 +3,21 @@
 import {
   Box,
   Building2,
+  Footprints,
   GitBranch,
+  Home,
   Layers3,
+  ListTree,
   LoaderCircle,
+  Orbit,
+  Scissors,
   Settings,
   SquareStack,
   TriangleAlert,
   UsersRound,
 } from "lucide-react";
 import type {
+  Clipper,
   FragmentsManager,
   ModelIdMap,
   OrthoPerspectiveCamera,
@@ -23,7 +29,14 @@ import type {
   Views,
   World,
 } from "@thatopen/components";
-import type { FragmentsModel } from "@thatopen/fragments";
+import type { FragmentsModel, ItemData, RaycastResult } from "@thatopen/fragments";
+// Resolved to a same-origin build asset URL by Vite (see the `?url` suffix),
+// so the fragments worker no longer needs a network round trip to
+// unpkg.com on every session — OBC.FragmentsManager.getWorker() fetches the
+// version-matched worker from there by default, which this bypasses. Only
+// the "./worker" subpath (-> dist/Worker/worker.mjs) is in the package's
+// public exports map; the smaller worker.min.mjs isn't externally importable.
+import fragmentsWorkerUrl from "@thatopen/fragments/worker?url";
 import type * as THREE from "three";
 import {
   type ReactNode,
@@ -34,13 +47,16 @@ import {
   useState,
 } from "react";
 import { PROTECTED_MODEL_CATALOG } from "../modelCatalog";
+import CategoryTree from "./CategoryTree";
+import ElementInspector, { type SelectedElement } from "./ElementInspector";
 import ProjectSettings, { type ProjectSetting } from "./ProjectSettings";
 
 type ModelStatus = "idle" | "streaming" | "loaded" | "error";
 
 type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
-type DashboardSection = "application-settings" | "viewer";
+type DashboardSection = "application-settings" | "home" | "viewer";
 type ViewMode = "2d" | "3d";
+type NavigationMode = "Orbit" | "FirstPerson";
 type HistoryUpdateMode = "push" | "replace";
 type ViewCatalogGroup = "Floor Plans" | "Elevations";
 
@@ -48,6 +64,13 @@ type ViewCatalogEntry = {
   group: ViewCatalogGroup;
   id: string;
   label: string;
+};
+
+type CategoryTreeEntry = {
+  category: string;
+  count: number;
+  map: ModelIdMap;
+  visible: boolean;
 };
 
 type VectorRouteValue = [number, number, number];
@@ -76,12 +99,27 @@ type ModelState = {
   status: ModelStatus;
 };
 
+type InteractionState = {
+  hoverBusy: boolean;
+  hoveredKey: string | null;
+  hoveredMap: ModelIdMap | null;
+  selectedKey: string | null;
+  selectedMap: ModelIdMap | null;
+};
+
 type Runtime = {
+  FRAGS: typeof import("@thatopen/fragments");
   OBC: typeof import("@thatopen/components");
   THREE: typeof import("three");
+  categoryTree: CategoryTreeEntry[];
+  categoryTreeBuildKey: string | null;
+  categoryTreeBuildPromise: Promise<CategoryTreeEntry[]> | null;
+  categoryTreeModelsKey: string | null;
+  clipper: Clipper;
   components: { dispose: () => void; get: <T>(component: unknown) => T };
   drawings: Map<string, TechnicalDrawing>;
   fragments: FragmentsManager;
+  interaction: InteractionState;
   viewCatalog: ViewCatalogEntry[];
   viewCatalogBuildKey: string | null;
   viewCatalogBuildPromise: Promise<ViewCatalogEntry[]> | null;
@@ -235,7 +273,7 @@ function parseRouteState(): BrowserRouteState {
     camera: null,
     modelId: null,
     projectId: DEFAULT_PROJECT_ID,
-    section: "viewer",
+    section: "home",
     view2dId: null,
     viewMode: DEFAULT_VIEW_MODE,
   };
@@ -247,21 +285,31 @@ function parseRouteState(): BrowserRouteState {
   const params = new URLSearchParams(window.location.search);
   const routeProjectId = params.get(ROUTE_PARAMS.project);
   const routeModel = getRouteModel(params.get(ROUTE_PARAMS.model));
+  const hasExplicitProject = isProjectId(routeProjectId) || Boolean(routeModel);
   const projectId = isProjectId(routeProjectId)
     ? routeProjectId
     : (routeModel?.project ?? DEFAULT_PROJECT_ID);
   const position = parseVectorRouteValue(params.get(ROUTE_PARAMS.camera));
   const target = parseVectorRouteValue(params.get(ROUTE_PARAMS.target));
   const viewMode = params.get(ROUTE_PARAMS.view) === "2d" ? "2d" : "3d";
+  const sectionParam = params.get(ROUTE_PARAMS.section);
+  // A link that names a project (?project=... or ?model=...) always opens
+  // straight into that project's viewer. Otherwise, land on the project
+  // picker rather than silently opening whatever DEFAULT_PROJECT_ID is.
+  const section: DashboardSection =
+    sectionParam === "application-settings"
+      ? "application-settings"
+      : sectionParam === "home" && !hasExplicitProject
+        ? "home"
+        : hasExplicitProject
+          ? "viewer"
+          : "home";
 
   return {
     camera: position && target ? { position, target } : null,
     modelId: getRouteModelId(routeModel?.id ?? null, projectId),
     projectId,
-    section:
-      params.get(ROUTE_PARAMS.section) === "application-settings"
-        ? "application-settings"
-        : "viewer",
+    section,
     view2dId: viewMode === "2d" ? params.get(ROUTE_PARAMS.view2d) : null,
     viewMode,
   };
@@ -274,6 +322,31 @@ function writeRouteState(
   if (typeof window === "undefined") return;
 
   const url = new URL(window.location.href);
+
+  if (routeState.section === "home") {
+    // A clean "home" URL carries no project/model/view state, so landing on
+    // it later (or reloading) shows the project picker again rather than
+    // silently re-entering whatever project was last active.
+    url.searchParams.set(ROUTE_PARAMS.section, "home");
+    url.searchParams.delete(ROUTE_PARAMS.project);
+    url.searchParams.delete(ROUTE_PARAMS.model);
+    url.searchParams.delete(ROUTE_PARAMS.view);
+    url.searchParams.delete(ROUTE_PARAMS.view2d);
+    url.searchParams.delete(ROUTE_PARAMS.camera);
+    url.searchParams.delete(ROUTE_PARAMS.target);
+
+    const homeUrl = `${url.pathname}${url.search}${url.hash}`;
+    const currentHomeUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (homeUrl === currentHomeUrl) return;
+
+    if (updateMode === "push") {
+      window.history.pushState(routeState, "", homeUrl);
+    } else {
+      window.history.replaceState(routeState, "", homeUrl);
+    }
+    return;
+  }
+
   url.searchParams.set(ROUTE_PARAMS.project, routeState.projectId);
   url.searchParams.set(ROUTE_PARAMS.view, routeState.viewMode);
 
@@ -532,6 +605,49 @@ async function buildViewCatalog(
   return catalog;
 }
 
+/**
+ * Groups every loaded item by its IFC category (e.g. IFCWALL, IFCDOOR) across
+ * all currently loaded models, for the category tree's visibility toggles.
+ */
+async function buildCategoryTree(
+  runtime: Runtime,
+  models: DemoModel[],
+): Promise<CategoryTreeEntry[]> {
+  const loadedModelIds = getLoadedModelIds(runtime, models);
+  if (!loadedModelIds.length) return [];
+
+  const byCategory = new Map<string, ModelIdMap>();
+
+  for (const modelId of loadedModelIds) {
+    const model = runtime.fragments.list.get(modelId);
+    if (!model) continue;
+
+    const itemsByCategory = await model.getItemsOfCategories([/.*/]);
+    for (const [category, localIds] of Object.entries(itemsByCategory)) {
+      if (!localIds.length) continue;
+      const map = byCategory.get(category) ?? {};
+      map[modelId] = new Set(localIds);
+      byCategory.set(category, map);
+    }
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, map]) => ({
+      category,
+      count: Object.values(map).reduce((sum, ids) => sum + ids.size, 0),
+      map,
+      visible: true,
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+}
+
+function resetCategoryTree(runtime: Runtime) {
+  runtime.categoryTree = [];
+  runtime.categoryTreeModelsKey = null;
+  runtime.categoryTreeBuildKey = null;
+  runtime.categoryTreeBuildPromise = null;
+}
+
 async function ensureDrawingForView(
   runtime: Runtime,
   models: DemoModel[],
@@ -574,6 +690,192 @@ async function ensureDrawingForView(
   return drawing;
 }
 
+const HOVER_COLOR = "#f2a93b";
+const SELECT_COLOR = "#1f7a5c";
+
+function buildHighlightStyle(runtime: Runtime, color: string) {
+  return {
+    color: new runtime.THREE.Color(color),
+    opacity: 1,
+    renderedFaces: runtime.FRAGS.RenderedFaces.TWO,
+    transparent: false,
+  };
+}
+
+/**
+ * Fully-transparent highlight style used to "hide" a category. FragmentsModel's
+ * own setVisible()/Hider component updates its internal visibility flag
+ * correctly (confirmed via getVisible()), but that change doesn't reliably
+ * propagate to already-rendered tiles in this fragments version — the mesh
+ * stays on screen. A transparent highlight material, by contrast, is proven
+ * to repaint immediately (same mechanism as hover/selection), so category
+ * visibility is implemented as a highlight instead of a real geometry hide.
+ */
+function buildHiddenStyle(runtime: Runtime) {
+  return {
+    color: new runtime.THREE.Color("#ffffff"),
+    opacity: 0,
+    renderedFaces: runtime.FRAGS.RenderedFaces.TWO,
+    transparent: true,
+  };
+}
+
+function raycastKey(result: RaycastResult) {
+  return `${result.fragments.modelId}:${result.localId}`;
+}
+
+function raycastMap(result: RaycastResult): ModelIdMap {
+  return { [result.fragments.modelId]: new Set([result.localId]) };
+}
+
+async function raycastAtEvent(
+  runtime: Runtime,
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement,
+) {
+  // FragmentsManager.raycast expects raw client pixel coordinates, not
+  // normalized device coordinates — it converts internally via the canvas's
+  // getBoundingClientRect()/clientWidth (see RaycastManager.screenToCast in
+  // @thatopen/fragments). Passing pre-normalized NDC here silently produces a
+  // ray pointing nowhere near the cursor, with no error, just no hits.
+  const mouse = new runtime.THREE.Vector2(event.clientX, event.clientY);
+
+  return runtime.fragments.raycast({
+    camera: runtime.world.camera.three,
+    dom: canvas,
+    mouse,
+  });
+}
+
+async function clearHover(runtime: Runtime) {
+  const { interaction } = runtime;
+  if (!interaction.hoveredMap || interaction.hoveredKey === interaction.selectedKey) {
+    interaction.hoveredKey = null;
+    interaction.hoveredMap = null;
+    return;
+  }
+
+  await runtime.fragments.resetHighlight(interaction.hoveredMap);
+  interaction.hoveredKey = null;
+  interaction.hoveredMap = null;
+  runtime.fragments.core.update(true);
+}
+
+async function handleCanvasHover(
+  runtime: Runtime,
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement,
+) {
+  const { interaction } = runtime;
+  if (interaction.hoverBusy) return;
+
+  interaction.hoverBusy = true;
+  try {
+    const result = await raycastAtEvent(runtime, event, canvas);
+    const key = result ? raycastKey(result) : null;
+
+    if (key === interaction.hoveredKey) return;
+
+    if (interaction.hoveredMap && interaction.hoveredKey !== interaction.selectedKey) {
+      await runtime.fragments.resetHighlight(interaction.hoveredMap);
+    }
+
+    if (result && key !== interaction.selectedKey) {
+      const map = raycastMap(result);
+      await runtime.fragments.highlight(
+        buildHighlightStyle(runtime, HOVER_COLOR),
+        map,
+      );
+      interaction.hoveredKey = key;
+      interaction.hoveredMap = map;
+      canvas.style.cursor = "pointer";
+    } else {
+      interaction.hoveredKey = null;
+      interaction.hoveredMap = null;
+      canvas.style.cursor = "default";
+    }
+
+    runtime.fragments.core.update(true);
+  } finally {
+    interaction.hoverBusy = false;
+  }
+}
+
+async function fetchSelectedElement(
+  runtime: Runtime,
+  result: RaycastResult,
+): Promise<SelectedElement> {
+  const modelId = result.fragments.modelId;
+  const map: ModelIdMap = { [modelId]: new Set([result.localId]) };
+  const dataByModel = await runtime.fragments.getData(map, {
+    attributesDefault: true,
+  });
+  const data: ItemData = dataByModel[modelId]?.[0] ?? {};
+
+  const nameAttribute = data.Name;
+  const categoryAttribute = data._category;
+  const name =
+    nameAttribute && !Array.isArray(nameAttribute) && "value" in nameAttribute
+      ? String(nameAttribute.value)
+      : null;
+  const category =
+    categoryAttribute &&
+    !Array.isArray(categoryAttribute) &&
+    "value" in categoryAttribute
+      ? String(categoryAttribute.value)
+      : null;
+
+  return { category, data, localId: result.localId, modelId, name };
+}
+
+async function handleCanvasSelect(
+  runtime: Runtime,
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement,
+  onSelect: (element: SelectedElement | null) => void,
+) {
+  const { interaction } = runtime;
+  const result = await raycastAtEvent(runtime, event, canvas);
+
+  if (interaction.hoveredMap && interaction.hoveredKey !== interaction.selectedKey) {
+    await runtime.fragments.resetHighlight(interaction.hoveredMap);
+  }
+  interaction.hoveredKey = null;
+  interaction.hoveredMap = null;
+
+  if (interaction.selectedMap) {
+    await runtime.fragments.resetHighlight(interaction.selectedMap);
+    interaction.selectedKey = null;
+    interaction.selectedMap = null;
+  }
+
+  if (!result) {
+    onSelect(null);
+    runtime.fragments.core.update(true);
+    return;
+  }
+
+  const key = raycastKey(result);
+  const map = raycastMap(result);
+  await runtime.fragments.highlight(buildHighlightStyle(runtime, SELECT_COLOR), map);
+  interaction.selectedKey = key;
+  interaction.selectedMap = map;
+  runtime.fragments.core.update(true);
+
+  const element = await fetchSelectedElement(runtime, result);
+  onSelect(element);
+}
+
+async function clearSelectionHighlight(runtime: Runtime) {
+  const { interaction } = runtime;
+  if (interaction.selectedMap) {
+    await runtime.fragments.resetHighlight(interaction.selectedMap);
+    runtime.fragments.core.update(true);
+  }
+  interaction.selectedKey = null;
+  interaction.selectedMap = null;
+}
+
 const initialModelState = (): Record<string, ModelState> =>
   Object.fromEntries(
     MODELS.map((model) => [
@@ -590,12 +892,12 @@ const initialModelState = (): Record<string, ModelState> =>
 async function streamModel(
   url: string,
   onProgress: (bytesLoaded: number, bytesTotal: number) => void,
-  getAuthToken?: () => Promise<string | null>,
 ) {
-  const token = getAuthToken ? await getAuthToken() : null;
-  const response = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
+  // No Authorization header: model files aren't confidential and the API
+  // route doesn't check auth (see api/models/[modelId].ts), so omitting it
+  // lets shared/CDN caches actually cache the response instead of treating
+  // every request as unique to a caller.
+  const response = await fetch(url);
 
   if (!response.ok || !response.body) {
     throw new Error(`Could not stream ${url}`);
@@ -654,8 +956,14 @@ export default function BimStreamer({
   const [hasAppliedInitialRoute, setHasAppliedInitialRoute] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [activeSection, setActiveSection] =
-    useState<DashboardSection>("viewer");
+    useState<DashboardSection>("home");
   const [modelStates, setModelStates] = useState(initialModelState);
+  // loadModel only needs this to guard re-entrancy, not to react to changes,
+  // and modelStates otherwise updates on every streamed byte — depending on
+  // it directly would recreate loadModel/loadAll (and re-run the effects
+  // that depend on them) on every progress tick.
+  const modelStatesRef = useRef(modelStates);
+  modelStatesRef.current = modelStates;
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] =
     useState<ProjectId>(DEFAULT_PROJECT_ID);
@@ -665,6 +973,13 @@ export default function BimStreamer({
   const [isProjecting2D, setIsProjecting2D] = useState(false);
   const [projectionError, setProjectionError] = useState<string | null>(null);
   const [cameraRouteVersion, setCameraRouteVersion] = useState(0);
+  const [selectedElement, setSelectedElement] =
+    useState<SelectedElement | null>(null);
+  const [categoryTree, setCategoryTree] = useState<CategoryTreeEntry[]>([]);
+  const [navigationMode, setNavigationModeState] =
+    useState<NavigationMode>("Orbit");
+  const [isSectionMode, setIsSectionMode] = useState(false);
+  const [sectionCount, setSectionCount] = useState(0);
   const is2DView = activeViewId !== null;
 
   const resolvedProjects = useMemo(
@@ -748,6 +1063,8 @@ export default function BimStreamer({
       onProjectNameSaved &&
       activeProjectSettings,
   );
+  const showProjectSettingsPanel = isProjectSettingsOpen && canShowProjectSettings;
+  const showElementInspectorPanel = !showProjectSettingsPanel && Boolean(selectedElement);
 
   const queueCameraRouteUpdate = useCallback(() => {
     if (typeof window === "undefined" || cameraRouteTimerRef.current) return;
@@ -815,7 +1132,9 @@ export default function BimStreamer({
         routeState.section === "application-settings" &&
           canShowApplicationSettings
           ? "application-settings"
-          : "viewer",
+          : routeState.section === "home"
+            ? "home"
+            : "viewer",
       );
       setLoadRequestId((requestId) => requestId + 1);
       setHasAppliedInitialRoute(true);
@@ -862,9 +1181,10 @@ export default function BimStreamer({
       if (!viewerRef.current) return;
 
       try {
-        const [OBC, THREE] = await Promise.all([
+        const [OBC, THREE, FRAGS] = await Promise.all([
           import("@thatopen/components"),
           import("three"),
+          import("@thatopen/fragments"),
         ]);
         const components = new OBC.Components();
         const worlds = components.get(OBC.Worlds);
@@ -891,8 +1211,16 @@ export default function BimStreamer({
         components.init();
         components.get(OBC.Grids).create(world);
 
-        const workerUrl = await OBC.FragmentsManager.getWorker();
         const fragments = components.get(OBC.FragmentsManager);
+        // The self-hosted worker asset (see the top-of-file import) only
+        // resolves correctly once bundled for production — in the Vite dev
+        // server, requesting it as a live module worker fails silently and
+        // every model load hangs. Fall back to the unpkg-hosted worker
+        // (OBC.FragmentsManager's own default) for local development, where
+        // that one extra fetch is a non-issue.
+        const workerUrl = import.meta.env.DEV
+          ? await OBC.FragmentsManager.getWorker()
+          : fragmentsWorkerUrl;
         fragments.init(workerUrl);
 
         world.camera.controls.addEventListener("update", () => {
@@ -923,13 +1251,28 @@ export default function BimStreamer({
 
         const views = components.get<Views>(OBC.Views);
         views.world = world;
+        const clipper = components.get<Clipper>(OBC.Clipper);
+        clipper.enabled = false;
 
         runtimeRef.current = {
+          FRAGS,
           OBC,
           THREE,
+          categoryTree: [],
+          categoryTreeBuildKey: null,
+          categoryTreeBuildPromise: null,
+          categoryTreeModelsKey: null,
+          clipper,
           components,
           drawings: new Map(),
           fragments,
+          interaction: {
+            hoverBusy: false,
+            hoveredKey: null,
+            hoveredMap: null,
+            selectedKey: null,
+            selectedMap: null,
+          },
           viewCatalog: [],
           viewCatalogBuildKey: null,
           viewCatalogBuildPromise: null,
@@ -976,6 +1319,38 @@ export default function BimStreamer({
     setViewCatalog([]);
   }, []);
 
+  const clearSelection = useCallback(() => {
+    const runtime = runtimeRef.current;
+    setSelectedElement(null);
+    if (!runtime) return;
+    void clearSelectionHighlight(runtime);
+  }, []);
+
+  const setNavigationMode = useCallback((mode: NavigationMode) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    runtime.world.camera.set(mode);
+    setNavigationModeState(mode);
+  }, []);
+
+  const toggleSectionMode = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    const next = !runtime.clipper.enabled;
+    runtime.clipper.enabled = next;
+    setIsSectionMode(next);
+  }, []);
+
+  const clearSections = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    runtime.clipper.deleteAll();
+    setSectionCount(0);
+  }, []);
+
   const ensureViewCatalog = useCallback(
     async (runtime: Runtime) => {
       const loadedModelIds = getLoadedModelIds(runtime, currentModels);
@@ -1012,6 +1387,105 @@ export default function BimStreamer({
     [currentModels],
   );
 
+  const resetCategoryTreeState = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    resetCategoryTree(runtime);
+    setCategoryTree([]);
+  }, []);
+
+  const ensureCategoryTree = useCallback(
+    async (runtime: Runtime) => {
+      const loadedModelIds = getLoadedModelIds(runtime, currentModels);
+      const modelsKey = loadedModelIds.join("|");
+      if (runtime.categoryTreeModelsKey === modelsKey) {
+        return runtime.categoryTree;
+      }
+
+      if (
+        runtime.categoryTreeBuildPromise &&
+        runtime.categoryTreeBuildKey === modelsKey
+      ) {
+        return runtime.categoryTreeBuildPromise;
+      }
+
+      const buildPromise = buildCategoryTree(runtime, currentModels).then(
+        (tree) => {
+          if (runtime.categoryTreeBuildPromise === buildPromise) {
+            runtime.categoryTreeBuildPromise = null;
+            runtime.categoryTreeBuildKey = null;
+          }
+          runtime.categoryTree = tree;
+          runtime.categoryTreeModelsKey = modelsKey;
+          setCategoryTree(tree);
+          return tree;
+        },
+      );
+      runtime.categoryTreeBuildPromise = buildPromise;
+      runtime.categoryTreeBuildKey = modelsKey;
+      return buildPromise;
+    },
+    [currentModels],
+  );
+
+  const toggleCategory = useCallback(async (category: string) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    const entry = runtime.categoryTree.find((item) => item.category === category);
+    if (!entry) return;
+
+    const nextVisible = !entry.visible;
+    if (nextVisible) {
+      await runtime.fragments.resetHighlight(entry.map);
+    } else {
+      await runtime.fragments.highlight(buildHiddenStyle(runtime), entry.map);
+    }
+    runtime.categoryTree = runtime.categoryTree.map((item) =>
+      item.category === category ? { ...item, visible: nextVisible } : item,
+    );
+    setCategoryTree(runtime.categoryTree);
+    runtime.fragments.core.update(true);
+  }, []);
+
+  const isolateCategory = useCallback(async (category: string) => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    const hiddenStyle = buildHiddenStyle(runtime);
+    for (const item of runtime.categoryTree) {
+      if (item.category === category) {
+        await runtime.fragments.resetHighlight(item.map);
+      } else {
+        await runtime.fragments.highlight(hiddenStyle, item.map);
+      }
+    }
+    runtime.categoryTree = runtime.categoryTree.map((item) => ({
+      ...item,
+      visible: item.category === category,
+    }));
+    setCategoryTree(runtime.categoryTree);
+    runtime.fragments.core.update(true);
+  }, []);
+
+  const showAllCategories = useCallback(async () => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    for (const item of runtime.categoryTree) {
+      if (!item.visible) {
+        await runtime.fragments.resetHighlight(item.map);
+      }
+    }
+    runtime.categoryTree = runtime.categoryTree.map((item) => ({
+      ...item,
+      visible: true,
+    }));
+    setCategoryTree(runtime.categoryTree);
+    runtime.fragments.core.update(true);
+  }, []);
+
   const selectView = useCallback(
     async (
       nextViewId: string | null,
@@ -1033,6 +1507,7 @@ export default function BimStreamer({
         }
 
         runtime.world.camera.set("Orbit");
+        setNavigationModeState("Orbit");
         await runtime.world.camera.projection.set("Perspective");
         await runtime.world.camera.controls.setLookAt(
           ...DEFAULT_CAMERA_VIEW.position,
@@ -1045,6 +1520,7 @@ export default function BimStreamer({
       }
 
       setIsProjecting2D(true);
+      clearSelection();
 
       try {
         const loadedModelIds = getLoadedModelIds(runtime, currentModels);
@@ -1110,6 +1586,7 @@ export default function BimStreamer({
           drawing.three.visible = false;
         }
         runtime.world.camera.set("Orbit");
+        setNavigationModeState("Orbit");
         await runtime.world.camera.projection.set("Perspective");
         await runtime.world.camera.controls.setLookAt(
           ...DEFAULT_CAMERA_VIEW.position,
@@ -1126,16 +1603,20 @@ export default function BimStreamer({
         setIsProjecting2D(false);
       }
     },
-    [currentModels, ensureViewCatalog, isProjecting2D],
+    [clearSelection, currentModels, ensureViewCatalog, isProjecting2D],
   );
 
   const loadModel = useCallback(
     async (model: DemoModel) => {
       const runtime = runtimeRef.current;
-      if (!runtime || modelStates[model.id].status === "streaming") return;
+      if (!runtime || modelStatesRef.current[model.id].status === "streaming") {
+        return;
+      }
       resetViews();
       setActiveViewId(null);
       setProjectionError(null);
+      clearSelection();
+      resetCategoryTreeState();
 
       if (!model.url) {
         setActiveModelId(model.id);
@@ -1171,12 +1652,14 @@ export default function BimStreamer({
                 : 0,
             });
           },
-          getAuthToken,
         );
         const streamedBytes = buffer.byteLength;
 
+        // fragments.list.onItemSet (wired in initViewer) already calls
+        // core.update(true) as soon as this model is added to the list,
+        // which core.load() guarantees has happened by the time it resolves
+        // — an extra call here would just repeat that same flush.
         await runtime.fragments.core.load(buffer, { modelId: model.id });
-        runtime.fragments.core.update(true);
         setModelState(model.id, {
           bytesLoaded: streamedBytes,
           bytesTotal: streamedBytes,
@@ -1196,7 +1679,7 @@ export default function BimStreamer({
         });
       }
     },
-    [getAuthToken, modelStates, resetViews, setModelState],
+    [clearSelection, resetCategoryTreeState, resetViews, setModelState],
   );
 
   const unloadAllModels = useCallback(async () => {
@@ -1205,6 +1688,8 @@ export default function BimStreamer({
       resetViews();
       setActiveViewId(null);
       setProjectionError(null);
+      clearSelection();
+      resetCategoryTreeState();
 
       for (const model of MODELS) {
         if (runtime.fragments.list.has(model.id)) {
@@ -1216,7 +1701,7 @@ export default function BimStreamer({
 
     setActiveModelId(null);
     setModelStates(initialModelState());
-  }, [resetViews]);
+  }, [clearSelection, resetCategoryTreeState, resetViews]);
 
   const switchProject = async (project: ProjectId) => {
     if (project !== activeProjectId || activeSection !== "viewer") {
@@ -1243,15 +1728,29 @@ export default function BimStreamer({
     setActiveSection("application-settings");
   };
 
+  const goHome = () => {
+    if (activeSection === "home") return;
+
+    routeWriteModeRef.current = "push";
+    if (isProjectSettingsOpen) {
+      onProjectSettingsToggle?.();
+    }
+    setActiveSection("home");
+  };
+
   const loadAll = useCallback(async () => {
     const preferredModelId = getRouteModelId(activeModelId, activeProjectId);
 
-    for (const model of currentModels) {
-      if (!model.url) continue;
-      if (modelStates[model.id].status !== "loaded") {
-        await loadModel(model);
-      }
-    }
+    // Each model's own fetch+parse is independent, so load a project's
+    // disciplines (e.g. architecture + structure) concurrently instead of
+    // making the smaller one wait on the larger one to finish first.
+    await Promise.all(
+      currentModels
+        .filter(
+          (model) => model.url && modelStates[model.id].status !== "loaded",
+        )
+        .map((model) => loadModel(model)),
+    );
 
     if (
       preferredModelId &&
@@ -1262,7 +1761,10 @@ export default function BimStreamer({
   }, [activeModelId, activeProjectId, currentModels, loadModel, modelStates]);
 
   useEffect(() => {
-    if (!isReady) {
+    // Don't eagerly stream a project's models before the user has actually
+    // chosen to view one — landing on the home page shouldn't kick off
+    // multi-MB downloads for whatever project happens to be "default".
+    if (!isReady || activeSection !== "viewer") {
       return;
     }
 
@@ -1293,6 +1795,7 @@ export default function BimStreamer({
     return () => window.clearTimeout(timeoutId);
   }, [
     activeProjectId,
+    activeSection,
     currentModels,
     isReady,
     loadAll,
@@ -1322,6 +1825,91 @@ export default function BimStreamer({
   }, [activeCount, currentModels, ensureViewCatalog, isReady, resetViews]);
 
   useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !isReady) return;
+
+    const loadedModelIds = getLoadedModelIds(runtime, currentModels);
+    if (!loadedModelIds.length) {
+      if (runtime.categoryTree.length) {
+        resetCategoryTreeState();
+      }
+      return;
+    }
+
+    if (runtime.categoryTreeModelsKey === loadedModelIds.join("|")) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void ensureCategoryTree(runtime);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    activeCount,
+    currentModels,
+    ensureCategoryTree,
+    isReady,
+    resetCategoryTreeState,
+  ]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !isReady || is2DView || isSectionMode) return;
+
+    const canvas = runtime.world.renderer.three.domElement;
+
+    const onPointerMove = (event: PointerEvent) => {
+      void handleCanvasHover(runtime, event, canvas);
+    };
+    const onPointerLeave = () => {
+      void clearHover(runtime);
+      canvas.style.cursor = "default";
+    };
+    const onClick = (event: MouseEvent) => {
+      void handleCanvasSelect(runtime, event, canvas, setSelectedElement);
+    };
+
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.addEventListener("click", onClick);
+
+    return () => {
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerleave", onPointerLeave);
+      canvas.removeEventListener("click", onClick);
+      canvas.style.cursor = "default";
+      void clearHover(runtime);
+    };
+  }, [is2DView, isReady, isSectionMode]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !isReady || is2DView || !isSectionMode) return;
+
+    const canvas = runtime.world.renderer.three.domElement;
+    const { clipper } = runtime;
+
+    const updateCount = () => setSectionCount(clipper.list.size);
+    const onDoubleClick = () => {
+      void clipper.create(runtime.world).then(() => {
+        runtime.fragments.core.update(true);
+        updateCount();
+      });
+    };
+
+    clipper.onAfterCreate.add(updateCount);
+    clipper.onAfterDelete.add(updateCount);
+    canvas.addEventListener("dblclick", onDoubleClick);
+    canvas.style.cursor = "crosshair";
+
+    return () => {
+      clipper.onAfterCreate.remove(updateCount);
+      clipper.onAfterDelete.remove(updateCount);
+      canvas.removeEventListener("dblclick", onDoubleClick);
+      canvas.style.cursor = "default";
+    };
+  }, [is2DView, isReady, isSectionMode]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handlePopState = () => {
@@ -1345,7 +1933,9 @@ export default function BimStreamer({
           routeState.section === "application-settings" &&
             canShowApplicationSettings
             ? "application-settings"
-            : "viewer",
+            : routeState.section === "home"
+              ? "home"
+              : "viewer",
         );
         setLoadRequestId((requestId) => requestId + 1);
       };
@@ -1427,27 +2017,37 @@ export default function BimStreamer({
 
         <section className="sidebar-projects" aria-label="Projects">
           <span>Projects</span>
-          <div className="project-list">
-            {resolvedProjects.map((project) => (
-              <button
-                aria-pressed={activeProjectId === project.id}
-                className="project-button"
-                key={project.id}
-                onClick={() => void switchProject(project.id)}
-                type="button"
+          <button
+            aria-pressed={activeSection === "home"}
+            className="project-button"
+            onClick={goHome}
+            type="button"
+          >
+            <Home className="icon" aria-hidden="true" />
+            <span>
+              <strong>Home</strong>
+              <small>All projects</small>
+            </span>
+          </button>
+
+          {activeSection !== "home" ? (
+            <label className="project-switcher">
+              <span>Current project</span>
+              <select
+                aria-label="Switch project"
+                onChange={(event) =>
+                  void switchProject(event.target.value as ProjectId)
+                }
+                value={activeProjectId}
               >
-                {project.id === "demo" ? (
-                  <Layers3 className="icon" aria-hidden="true" />
-                ) : (
-                  <Building2 className="icon" aria-hidden="true" />
-                )}
-                <span>
-                  <strong>{project.label}</strong>
-                  {project.description ? <small>{project.description}</small> : null}
-                </span>
-              </button>
-            ))}
-          </div>
+                {resolvedProjects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </section>
 
         {canShowApplicationSettings ? (
@@ -1492,8 +2092,17 @@ export default function BimStreamer({
       >
         <section
           aria-hidden={activeSection !== "viewer"}
-          className={`project-grid${isProjectSettingsOpen && canShowProjectSettings ? " has-settings" : ""}${activeSection === "viewer" ? "" : " is-background"}`}
+          className={`project-grid${showProjectSettingsPanel || showElementInspectorPanel ? " has-settings" : ""}${categoryTree.length ? " has-tree" : ""}${activeSection === "viewer" ? "" : " is-background"}`}
         >
+          {categoryTree.length ? (
+            <CategoryTree
+              entries={categoryTree}
+              onIsolate={(category) => void isolateCategory(category)}
+              onShowAll={() => void showAllCategories()}
+              onToggle={(category) => void toggleCategory(category)}
+            />
+          ) : null}
+
           <section
             className="viewer-card"
             id="stream-viewer"
@@ -1553,6 +2162,63 @@ export default function BimStreamer({
                     ) : null}
                   </select>
                 </label>
+                {!is2DView ? (
+                  <button
+                    aria-label={
+                      navigationMode === "FirstPerson"
+                        ? "Switch to orbit navigation"
+                        : "Switch to first-person navigation"
+                    }
+                    aria-pressed={navigationMode === "FirstPerson"}
+                    className="nav-mode-toggle"
+                    disabled={!isReady}
+                    onClick={() =>
+                      setNavigationMode(
+                        navigationMode === "FirstPerson" ? "Orbit" : "FirstPerson",
+                      )
+                    }
+                    title={
+                      navigationMode === "FirstPerson"
+                        ? "First-person"
+                        : "Orbit"
+                    }
+                    type="button"
+                  >
+                    {navigationMode === "FirstPerson" ? (
+                      <Footprints className="icon" aria-hidden="true" />
+                    ) : (
+                      <Orbit className="icon" aria-hidden="true" />
+                    )}
+                  </button>
+                ) : null}
+                {!is2DView ? (
+                  <button
+                    aria-label={
+                      isSectionMode
+                        ? "Stop adding section planes"
+                        : "Add section plane (double-click the model)"
+                    }
+                    aria-pressed={isSectionMode}
+                    className="nav-mode-toggle"
+                    disabled={!isReady}
+                    onClick={toggleSectionMode}
+                    title="Section"
+                    type="button"
+                  >
+                    <Scissors className="icon" aria-hidden="true" />
+                  </button>
+                ) : null}
+                {!is2DView && sectionCount > 0 ? (
+                  <button
+                    aria-label="Clear all section planes"
+                    className="clear-sections-button"
+                    onClick={clearSections}
+                    title="Clear sections"
+                    type="button"
+                  >
+                    Clear sections ({sectionCount})
+                  </button>
+                ) : null}
                 {canShowProjectSettings ? (
                   <button
                     aria-label="Project settings"
@@ -1593,8 +2259,7 @@ export default function BimStreamer({
             </div>
           </section>
 
-          {isProjectSettingsOpen &&
-          canShowProjectSettings &&
+          {showProjectSettingsPanel &&
           getAuthToken &&
           onProjectNameSaved &&
           activeProjectSettings ? (
@@ -1607,6 +2272,15 @@ export default function BimStreamer({
               />
             </section>
           ) : null}
+
+          {showElementInspectorPanel && selectedElement ? (
+            <section className="settings-panel" aria-label="Element properties">
+              <ElementInspector
+                element={selectedElement}
+                onClose={clearSelection}
+              />
+            </section>
+          ) : null}
         </section>
 
         {activeSection === "application-settings" && applicationSettingsSlot ? (
@@ -1615,6 +2289,33 @@ export default function BimStreamer({
             aria-label="Application settings"
           >
             {applicationSettingsSlot}
+          </section>
+        ) : null}
+
+        {activeSection === "home" ? (
+          <section className="project-home" aria-label="Projects">
+            <header className="project-home-header">
+              <h1>{APP_NAME}</h1>
+              <p>Select a project to open its BIM viewer.</p>
+            </header>
+            <div className="project-home-grid">
+              {resolvedProjects.map((project) => (
+                <button
+                  className="project-card"
+                  key={project.id}
+                  onClick={() => void switchProject(project.id)}
+                  type="button"
+                >
+                  {project.id === "demo" ? (
+                    <Layers3 className="icon-lg" aria-hidden="true" />
+                  ) : (
+                    <Building2 className="icon-lg" aria-hidden="true" />
+                  )}
+                  <strong>{project.label}</strong>
+                  {project.description ? <p>{project.description}</p> : null}
+                </button>
+              ))}
+            </div>
           </section>
         ) : null}
       </section>

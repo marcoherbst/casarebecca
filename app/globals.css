@@ -176,6 +176,8 @@ input {
 
 .google-sign-in,
 .settings-toggle,
+.nav-mode-toggle,
+.clear-sections-button,
 .sign-out-button,
 .invite-form button,
 .project-name-form button,
@@ -263,9 +265,18 @@ input {
   gap: 8px;
 }
 
-.project-list {
+.project-switcher {
   display: grid;
   gap: 6px;
+  padding: 2px 2px 0;
+}
+
+.project-switcher span {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .project-button {
@@ -399,6 +410,28 @@ input {
 .settings-toggle[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-foreground);
+}
+
+.nav-mode-toggle {
+  width: 36px;
+  min-width: 36px;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.nav-mode-toggle[aria-pressed="true"] {
+  border-color: rgba(31, 122, 92, 0.36);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.clear-sections-button {
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 0.78rem;
 }
 
 .view-mode-picker {
@@ -538,6 +571,88 @@ input {
   font-weight: 650;
 }
 
+.element-inspector-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.element-inspector-panel header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.element-inspector-panel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.element-category {
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.element-inspector-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.element-inspector-close {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  cursor: pointer;
+}
+
+.element-attribute-list {
+  display: grid;
+  max-height: min(420px, 50vh);
+  gap: 2px;
+  margin: 0;
+  overflow: auto;
+}
+
+.element-attribute-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.element-attribute-row dt {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.element-attribute-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 0.82rem;
+}
+
 .admin-user-list,
 .invitation-list {
   display: grid;
@@ -627,6 +742,127 @@ button.project-button:hover:not(:disabled) {
 
 .project-grid.has-settings {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.project-grid.has-tree {
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+}
+
+.project-grid.has-tree.has-settings {
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(320px, 420px);
+}
+
+.category-tree-panel {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: 14px;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.category-tree-panel header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.category-tree-panel h2 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 1rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-tree-show-all {
+  justify-self: start;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.category-tree-list {
+  display: grid;
+  max-height: min(560px, 60vh);
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.category-tree-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.category-tree-row label {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.category-tree-row label input {
+  min-width: 0;
+  min-height: 0;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.category-tree-row label span {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-tree-row label small {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.category-tree-isolate {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.category-tree-isolate:hover {
+  border-color: var(--border);
+  background: var(--secondary);
+  color: var(--foreground);
 }
 
 .viewer-card {
@@ -727,6 +963,72 @@ button.project-button:hover:not(:disabled) {
   min-height: 0;
   align-content: start;
   gap: 18px;
+}
+
+.project-home {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+  gap: 22px;
+}
+
+.project-home-header h1 {
+  margin: 0 0 4px;
+  color: var(--foreground);
+  font-size: 1.5rem;
+}
+
+.project-home-header p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.project-home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.project-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 18px;
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    transform 150ms ease;
+}
+
+.project-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.project-card .icon-lg {
+  color: var(--primary);
+}
+
+.project-card strong {
+  color: var(--foreground);
+  font-size: 0.98rem;
+}
+
+.project-card p {
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .application-settings-view .admin-panel {
@@ -883,10 +1185,6 @@ button.project-button:hover:not(:disabled) {
     border-bottom: 1px solid var(--border);
   }
 
-  .project-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .sidebar-footer {
     margin-top: 0;
   }
@@ -901,6 +1199,11 @@ button.project-button:hover:not(:disabled) {
   }
 
   .project-grid.has-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .project-grid.has-tree,
+  .project-grid.has-tree.has-settings {
     grid-template-columns: 1fr;
   }
 

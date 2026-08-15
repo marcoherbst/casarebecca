@@ -41,9 +41,26 @@ export default async function handler(req: ApiRequest, res: ServerResponse) {
       model.fragmentFileName,
     );
     const stats = statSync(modelPath);
+    const lastModified = stats.mtime.toUTCString();
+
+    // Model files aren't confidential (auth was intentionally dropped from
+    // this route — see AuthShell.tsx) and rarely change, so cache them
+    // instead of forcing a full multi-MB re-download on every visit. The
+    // URL has no content hash, so this stays conservative (an hour, plus a
+    // day of serving stale-while-revalidating) rather than treating the
+    // file as permanently immutable.
+    if (req.headers["if-modified-since"] === lastModified) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
 
     res.statusCode = 200;
-    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=3600, stale-while-revalidate=86400",
+    );
+    res.setHeader("Last-Modified", lastModified);
     res.setHeader("Content-Length", stats.size.toString());
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("X-Model-Name", model.projectName);

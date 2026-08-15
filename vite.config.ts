@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
@@ -52,6 +53,16 @@ export default defineConfig({
   define: {
     "process.env.NEXT_PUBLIC_GIT_COMMIT_SHA": JSON.stringify(commitSha),
     "process.env.NEXT_PUBLIC_GIT_BRANCH": JSON.stringify(branch),
+  },
+  resolve: {
+    alias: {
+      // See build/empty-web-ifc.ts — this app never converts IFC in the
+      // browser, so the real web-ifc package (and its ~3.4MB WASM glue)
+      // doesn't need to ship in the client bundle.
+      "web-ifc": fileURLToPath(
+        new URL("./build/empty-web-ifc.ts", import.meta.url),
+      ),
+    },
   },
   plugins: [
     vinext(),
