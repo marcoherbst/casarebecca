@@ -529,10 +529,13 @@ function resetViewCatalog(runtime: Runtime) {
 }
 
 /**
- * Generates the app's standard 2D view set for the currently loaded models:
- * one floor plan per IFC building storey (falling back to a single overall
- * plan when storey metadata isn't available, e.g. the bundled demo models),
- * plus front/back/left/right elevations of the combined model bounds.
+ * Generates the app's standard set of `OBC.Views` — cut planes with a name,
+ * normal, and height range (one per IFC building storey, falling back to a
+ * single overall plan when storey metadata isn't available, e.g. the bundled
+ * demo models, plus front/back/left/right elevations of the combined model
+ * bounds). A `View` is just that plane definition; it has no visual
+ * representation of its own until `ensureDrawingForView` projects the model
+ * onto it to produce an actual `TechnicalDrawing`.
  */
 async function buildViewCatalog(
   runtime: Runtime,
@@ -648,6 +651,47 @@ function resetCategoryTree(runtime: Runtime) {
   runtime.categoryTreeBuildPromise = null;
 }
 
+/**
+ * Frames the camera on an arbitrary Object3D's own bounding sphere.
+ *
+ * `OrthoPerspectiveCamera.fit()` always folds in every loaded Fragments
+ * model's bounds on top of whatever meshes you pass it (it's built for the
+ * "orbit the 3D scene" case), so it can't be used to frame a `TechnicalDrawing`
+ * in isolation — the hidden 3D models it was projected from would still
+ * dominate the framing. This replicates fit()'s underlying mechanism
+ * (bounding sphere + `controls.fitToSphere`) against just the given object.
+ *
+ * Deliberately does NOT reuse fit()'s own `maxDim * offset` radius formula:
+ * that treats the single longest axis as the sphere's radius, which is a
+ * reasonable-looking overestimate for a roughly cube-shaped 3D building but
+ * leaves a lot of dead space around a flat, elongated shape like a floor
+ * plan or elevation drawing (aspect ratios of 2:1 or more are typical).
+ * Using the box's actual diagonal gives a sphere that's a tight fit
+ * regardless of aspect ratio.
+ */
+async function fitCameraToObject(
+  runtime: Runtime,
+  object: THREE.Object3D,
+  offset = 1.1,
+) {
+  const box = new runtime.THREE.Box3().setFromObject(object);
+  if (box.isEmpty()) return;
+
+  const size = box.getSize(new runtime.THREE.Vector3());
+  const center = box.getCenter(new runtime.THREE.Vector3());
+  const radius = (size.length() / 2) * offset;
+  await runtime.world.camera.controls.fitToSphere(
+    new runtime.THREE.Sphere(center, radius),
+    true,
+  );
+}
+
+/**
+ * Builds (and caches) the `TechnicalDrawing` for a given `View` — the actual
+ * vector line-art produced by projecting the loaded models onto that view's
+ * plane. This is a distinct rendering technology from `OBC.Views` itself:
+ * the view only supplies the cut plane and range used for the projection.
+ */
 async function ensureDrawingForView(
   runtime: Runtime,
   models: DemoModel[],
@@ -1053,7 +1097,9 @@ export default function BimStreamer({
         : "Idle";
 
   const canToggle2D = isReady && activeCount > 0 && !isStreamingAny;
-  const displayedStreamStatus = isProjecting2D ? "Projecting 2D" : streamStatus;
+  const displayedStreamStatus = isProjecting2D
+    ? "Generating drawing"
+    : streamStatus;
   const displayedStreamStatusClass = isProjecting2D
     ? "streaming"
     : streamStatus.toLowerCase().replace(" ", "-");
@@ -1566,6 +1612,8 @@ export default function BimStreamer({
           true,
         );
 
+        // Rough initial framing from the source model's bounds, so the
+        // camera lands somewhere sane while the drawing is still building.
         const meshes = collectProjectMeshes(runtime, currentModels);
         if (meshes.length) {
           await runtime.world.camera.fit(meshes, 1.25);
@@ -1578,6 +1626,11 @@ export default function BimStreamer({
         );
         setProjectModelsVisible(runtime, currentModels, false);
         drawing.three.visible = true;
+
+        // camera.fit() above always folds the hidden 3D models' bounds back
+        // in (see fitCameraToObject's docstring), so it can't frame the
+        // drawing on its own — do a final fit against just the drawing.
+        await fitCameraToObject(runtime, drawing.three);
         runtime.fragments.core.update(true);
         setActiveViewId(nextViewId);
       } catch (error) {
@@ -1596,7 +1649,7 @@ export default function BimStreamer({
         setProjectionError(
           error instanceof Error
             ? error.message
-            : "That 2D view could not be generated.",
+            : "That technical drawing could not be generated.",
         );
         setActiveViewId(null);
       } finally {
@@ -2128,7 +2181,7 @@ export default function BimStreamer({
               <div className="viewer-toolbar-actions">
                 <label
                   className={`view-mode-picker${is2DView ? " is-2d" : ""}`}
-                  title={is2DView ? "2D view" : "3D view"}
+                  title={is2DView ? "Technical drawing" : "3D model"}
                 >
                   {isProjecting2D ? (
                     <LoaderCircle className="icon spin" aria-hidden="true" />
@@ -2138,7 +2191,7 @@ export default function BimStreamer({
                     <Box className="icon" aria-hidden="true" />
                   )}
                   <select
-                    aria-label="Viewport mode"
+                    aria-label="3D model or technical drawing"
                     className="view-mode-select"
                     disabled={!canToggle2D || isProjecting2D}
                     onChange={(event) =>
