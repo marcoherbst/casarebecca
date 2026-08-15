@@ -176,7 +176,6 @@ input {
 
 .google-sign-in,
 .settings-toggle,
-.view-mode-toggle,
 .sign-out-button,
 .invite-form button,
 .project-name-form button,
@@ -402,26 +401,54 @@ input {
   color: var(--accent-foreground);
 }
 
-.view-mode-toggle {
-  min-width: 70px;
+.view-mode-picker {
+  display: inline-flex;
+  min-height: 36px;
+  min-width: 128px;
+  align-items: center;
+  gap: 8px;
   padding: 0 10px;
   border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--secondary);
   color: var(--secondary-foreground);
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
 }
 
-.view-mode-toggle[aria-pressed="true"] {
+.view-mode-picker.is-2d {
   border-color: rgba(31, 122, 92, 0.36);
   background: var(--accent);
   color: var(--accent-foreground);
 }
 
-.view-mode-toggle .view-mode-label {
+.view-mode-picker .icon {
+  flex: 0 0 auto;
+}
+
+.view-mode-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
   color: inherit;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
+  cursor: inherit;
+}
+
+.view-mode-select:disabled {
+  cursor: not-allowed;
+}
+
+.view-mode-select:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .sign-out-button {

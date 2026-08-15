@@ -7,7 +7,6 @@ import {
   type ApiRequest,
   getRequestOrigin,
   requireMethod,
-  requireUser,
   sendError,
 } from "../../server/supabaseAuth.js";
 
@@ -28,7 +27,6 @@ function getModelIdFromPath(req: ApiRequest) {
 export default async function handler(req: ApiRequest, res: ServerResponse) {
   try {
     requireMethod(req, res, ["GET", "HEAD"]);
-    await requireUser(req);
 
     const modelId = getModelIdFromPath(req);
     const model = getProtectedModel(modelId);

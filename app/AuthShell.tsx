@@ -78,16 +78,17 @@ function GoogleSignInButton() {
   );
 }
 
-function SignInScreen() {
+function GuestControls() {
   return (
-    <main className="auth-screen">
-      <section className="auth-panel" aria-label="Sign in">
-        <span>{APP_NAME}</span>
-        <h1>BIM file streamer</h1>
-        <p>Google SSO is required for access.</p>
+    <div className="auth-controls">
+      <div className="signed-in-user">
+        <span>Guest</span>
+        <strong>Viewing without an account</strong>
+      </div>
+      <div className="auth-actions">
         <GoogleSignInButton />
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }
 
@@ -301,15 +302,15 @@ export default function AuthShell() {
     );
   }
 
-  if (!session) {
-    return <SignInScreen />;
-  }
-
   const verifiedCurrentUser =
-    currentUser && currentUser.id === session.user.id ? currentUser : null;
+    session && currentUser && currentUser.id === session.user.id
+      ? currentUser
+      : null;
   const canManageUsers = verifiedCurrentUser?.role === "admin";
 
-  if (currentUserError) {
+  // Models aren't confidential, so viewing the BIM streamer doesn't require an
+  // account. Only a signed-in session unlocks admin/project-management tools.
+  if (session && currentUserError) {
     return (
       <AccountErrorScreen
         message={currentUserError}
@@ -318,7 +319,7 @@ export default function AuthShell() {
     );
   }
 
-  if (!verifiedCurrentUser) {
+  if (session && !verifiedCurrentUser) {
     return (
       <main className="auth-screen">
         <section className="auth-panel" aria-label="Loading account">
@@ -332,15 +333,19 @@ export default function AuthShell() {
   return (
     <BimStreamer
       controlSlot={
-        <>
-          <AuthControls
-            currentUser={verifiedCurrentUser ?? fallbackUser(session.user)}
-            onSignOut={() => void signOut()}
-          />
-          {currentUserError ? (
-            <p className="error-text auth-error">{currentUserError}</p>
-          ) : null}
-        </>
+        session ? (
+          <>
+            <AuthControls
+              currentUser={verifiedCurrentUser ?? fallbackUser(session.user)}
+              onSignOut={() => void signOut()}
+            />
+            {currentUserError ? (
+              <p className="error-text auth-error">{currentUserError}</p>
+            ) : null}
+          </>
+        ) : (
+          <GuestControls />
+        )
       }
       applicationSettingsSlot={
         canManageUsers ? <AdminUsers getAuthToken={getAuthToken} /> : null

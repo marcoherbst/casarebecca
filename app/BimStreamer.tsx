@@ -19,6 +19,8 @@ import type {
   SimpleScene,
   TechnicalDrawing,
   TechnicalDrawings,
+  View,
+  Views,
   World,
 } from "@thatopen/components";
 import type { FragmentsModel } from "@thatopen/fragments";
@@ -40,6 +42,13 @@ type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
 type DashboardSection = "application-settings" | "viewer";
 type ViewMode = "2d" | "3d";
 type HistoryUpdateMode = "push" | "replace";
+type ViewCatalogGroup = "Floor Plans" | "Elevations";
+
+type ViewCatalogEntry = {
+  group: ViewCatalogGroup;
+  id: string;
+  label: string;
+};
 
 type VectorRouteValue = [number, number, number];
 
@@ -71,9 +80,13 @@ type Runtime = {
   OBC: typeof import("@thatopen/components");
   THREE: typeof import("three");
   components: { dispose: () => void; get: <T>(component: unknown) => T };
+  drawings: Map<string, TechnicalDrawing>;
   fragments: FragmentsManager;
-  projectionDrawing: TechnicalDrawing | null;
-  projectionKey: string | null;
+  viewCatalog: ViewCatalogEntry[];
+  viewCatalogBuildKey: string | null;
+  viewCatalogBuildPromise: Promise<ViewCatalogEntry[]> | null;
+  viewCatalogModelsKey: string | null;
+  views: Views;
   world: World & {
     camera: OrthoPerspectiveCamera;
     renderer: SimpleRenderer;
@@ -98,6 +111,7 @@ type BrowserRouteState = {
   modelId: string | null;
   projectId: ProjectId;
   section: DashboardSection;
+  view2dId: string | null;
   viewMode: ViewMode;
 };
 
@@ -185,6 +199,7 @@ const ROUTE_PARAMS = {
   section: "section",
   target: "target",
   view: "view",
+  view2d: "view2d",
 } as const;
 
 function isProjectId(value: string | null): value is ProjectId {
@@ -221,6 +236,7 @@ function parseRouteState(): BrowserRouteState {
     modelId: null,
     projectId: DEFAULT_PROJECT_ID,
     section: "viewer",
+    view2dId: null,
     viewMode: DEFAULT_VIEW_MODE,
   };
 
@@ -236,6 +252,7 @@ function parseRouteState(): BrowserRouteState {
     : (routeModel?.project ?? DEFAULT_PROJECT_ID);
   const position = parseVectorRouteValue(params.get(ROUTE_PARAMS.camera));
   const target = parseVectorRouteValue(params.get(ROUTE_PARAMS.target));
+  const viewMode = params.get(ROUTE_PARAMS.view) === "2d" ? "2d" : "3d";
 
   return {
     camera: position && target ? { position, target } : null,
@@ -245,7 +262,8 @@ function parseRouteState(): BrowserRouteState {
       params.get(ROUTE_PARAMS.section) === "application-settings"
         ? "application-settings"
         : "viewer",
-    viewMode: params.get(ROUTE_PARAMS.view) === "2d" ? "2d" : "3d",
+    view2dId: viewMode === "2d" ? params.get(ROUTE_PARAMS.view2d) : null,
+    viewMode,
   };
 }
 
@@ -263,6 +281,12 @@ function writeRouteState(
     url.searchParams.set(ROUTE_PARAMS.section, routeState.section);
   } else {
     url.searchParams.delete(ROUTE_PARAMS.section);
+  }
+
+  if (routeState.viewMode === "2d" && routeState.view2dId) {
+    url.searchParams.set(ROUTE_PARAMS.view2d, routeState.view2dId);
+  } else {
+    url.searchParams.delete(ROUTE_PARAMS.view2d);
   }
 
   if (routeState.modelId) {
@@ -417,6 +441,139 @@ async function getProjectModelIdMap(runtime: Runtime, models: DemoModel[]) {
   return modelIdMap;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resetViewCatalog(runtime: Runtime) {
+  for (const drawing of runtime.drawings.values()) {
+    drawing.dispose();
+  }
+  runtime.drawings.clear();
+  runtime.views.list.clear();
+  runtime.viewCatalog = [];
+  runtime.viewCatalogModelsKey = null;
+}
+
+/**
+ * Generates the app's standard 2D view set for the currently loaded models:
+ * one floor plan per IFC building storey (falling back to a single overall
+ * plan when storey metadata isn't available, e.g. the bundled demo models),
+ * plus front/back/left/right elevations of the combined model bounds.
+ */
+async function buildViewCatalog(
+  runtime: Runtime,
+  models: DemoModel[],
+): Promise<ViewCatalogEntry[]> {
+  const { THREE, views } = runtime;
+  resetViewCatalog(runtime);
+  views.world = runtime.world;
+
+  const loadedModelIds = getLoadedModelIds(runtime, models);
+  if (!loadedModelIds.length) return [];
+
+  const modelIdPattern = new RegExp(
+    `^(?:${loadedModelIds.map(escapeRegExp).join("|")})$`,
+  );
+  const bounds = getProjectModelBounds(runtime, models);
+  const catalog: ViewCatalogEntry[] = [];
+
+  const storeyViews = await views.createFromIfcStoreys({
+    modelIds: [modelIdPattern],
+  });
+
+  // Multi-discipline projects (e.g. architecture + structure) commonly reuse
+  // the same storey names, so createFromIfcStoreys can hand back several
+  // views per name — only the last-created one survives in views.list (later
+  // ids overwrite earlier ones there), so dispose the rest to avoid orphaned
+  // views and duplicate catalog entries.
+  const uniqueStoreyViews = new Map<string, View>();
+  for (const view of storeyViews) {
+    const previous = uniqueStoreyViews.get(view.id);
+    if (previous && previous !== view) {
+      previous.dispose();
+    }
+    uniqueStoreyViews.set(view.id, view);
+  }
+
+  if (uniqueStoreyViews.size) {
+    const sorted = [...uniqueStoreyViews.values()].sort(
+      (a, b) => a.plane.constant - b.plane.constant,
+    );
+
+    sorted.forEach((view, index) => {
+      const below = sorted[index - 1];
+      const lowerBound = below
+        ? below.plane.constant
+        : (bounds?.min.y ?? view.plane.constant - 6);
+      view.range = Math.max(view.plane.constant - lowerBound, 1);
+      catalog.push({ group: "Floor Plans", id: view.id, label: view.id });
+    });
+  } else if (bounds) {
+    const center = bounds.getCenter(new THREE.Vector3());
+    const topPoint = new THREE.Vector3(center.x, bounds.max.y, center.z);
+    const view = views.create(new THREE.Vector3(0, -1, 0), topPoint, {
+      id: "Overall Plan",
+    });
+    view.range = Math.max(bounds.max.y - bounds.min.y, 6);
+    catalog.push({ group: "Floor Plans", id: view.id, label: view.id });
+  }
+
+  const elevationViews = views.createElevations({
+    combine: true,
+    modelIds: [modelIdPattern],
+  });
+  for (const view of elevationViews) {
+    catalog.push({ group: "Elevations", id: view.id, label: view.id });
+  }
+
+  runtime.viewCatalog = catalog;
+  runtime.viewCatalogModelsKey = loadedModelIds.join("|");
+  return catalog;
+}
+
+async function ensureDrawingForView(
+  runtime: Runtime,
+  models: DemoModel[],
+  view: View,
+) {
+  const cached = runtime.drawings.get(view.id);
+  if (cached) return cached;
+
+  const drawing = runtime.components
+    .get<TechnicalDrawings>(runtime.OBC.TechnicalDrawings)
+    .create(runtime.world);
+  drawing.three.visible = false;
+  drawing.orientTo(view.plane.normal.clone());
+  drawing.three.position.copy(
+    view.plane.normal.clone().multiplyScalar(-view.plane.constant),
+  );
+  drawing.far = Math.max(view.range, 1);
+
+  drawing.layers.create(PROJECTION_LAYERS.visible, {
+    material: new runtime.THREE.LineBasicMaterial({
+      color: 0x17211d,
+      depthTest: false,
+    }),
+  });
+  drawing.layers.create(PROJECTION_LAYERS.hidden, {
+    material: new runtime.THREE.LineBasicMaterial({
+      color: 0x8a8f98,
+      depthTest: false,
+      opacity: 0.36,
+      transparent: true,
+    }),
+  });
+
+  await drawing.addProjectionFromItems(
+    await getProjectModelIdMap(runtime, models),
+    { layers: PROJECTION_LAYERS },
+  );
+
+  runtime.drawings.set(view.id, drawing);
+  return drawing;
+}
+
 const initialModelState = (): Record<string, ModelState> =>
   Object.fromEntries(
     MODELS.map((model) => [
@@ -488,7 +645,9 @@ export default function BimStreamer({
   const cameraRouteTimerRef = useRef<number | null>(null);
   const routeWriteModeRef = useRef<HistoryUpdateMode>("replace");
   const pendingRouteCameraRef = useRef<CameraRouteState | null>(null);
-  const pendingRouteViewModeRef = useRef<ViewMode | null>(null);
+  const pendingRouteViewRef = useRef<
+    { mode: "2d"; id: string | null } | { mode: "3d" } | null
+  >(null);
   const suppressNextRouteWriteRef = useRef(false);
   const canShowApplicationSettings = Boolean(applicationSettingsSlot);
   const [isReady, setIsReady] = useState(false);
@@ -501,10 +660,12 @@ export default function BimStreamer({
   const [activeProjectId, setActiveProjectId] =
     useState<ProjectId>(DEFAULT_PROJECT_ID);
   const [loadRequestId, setLoadRequestId] = useState(0);
-  const [is2DView, setIs2DView] = useState(false);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [viewCatalog, setViewCatalog] = useState<ViewCatalogEntry[]>([]);
   const [isProjecting2D, setIsProjecting2D] = useState(false);
   const [projectionError, setProjectionError] = useState<string | null>(null);
   const [cameraRouteVersion, setCameraRouteVersion] = useState(0);
+  const is2DView = activeViewId !== null;
 
   const resolvedProjects = useMemo(
     () =>
@@ -611,12 +772,20 @@ export default function BimStreamer({
           modelId,
           projectId: activeProjectId,
           section: activeSection,
+          view2dId: activeViewId,
           viewMode: is2DView ? "2d" : "3d",
         },
         updateMode,
       );
     },
-    [activeModelId, activeProjectId, activeSection, currentModels, is2DView],
+    [
+      activeModelId,
+      activeProjectId,
+      activeSection,
+      activeViewId,
+      currentModels,
+      is2DView,
+    ],
   );
 
   const applyRouteCamera = useCallback(async (camera: CameraRouteState) => {
@@ -636,8 +805,10 @@ export default function BimStreamer({
       const routeState = parseRouteState();
       suppressNextRouteWriteRef.current = true;
       pendingRouteCameraRef.current = routeState.camera;
-      pendingRouteViewModeRef.current =
-        routeState.viewMode === "2d" ? "2d" : null;
+      pendingRouteViewRef.current =
+        routeState.viewMode === "2d"
+          ? { mode: "2d", id: routeState.view2dId }
+          : { mode: "3d" };
       setActiveModelId(routeState.modelId);
       setActiveProjectId(routeState.projectId);
       setActiveSection(
@@ -668,6 +839,7 @@ export default function BimStreamer({
     activeModelId,
     activeProjectId,
     activeSection,
+    activeViewId,
     cameraRouteVersion,
     commitCurrentRouteState,
     hasAppliedInitialRoute,
@@ -749,13 +921,20 @@ export default function BimStreamer({
           return;
         }
 
+        const views = components.get<Views>(OBC.Views);
+        views.world = world;
+
         runtimeRef.current = {
           OBC,
           THREE,
           components,
+          drawings: new Map(),
           fragments,
-          projectionDrawing: null,
-          projectionKey: null,
+          viewCatalog: [],
+          viewCatalogBuildKey: null,
+          viewCatalogBuildPromise: null,
+          viewCatalogModelsKey: null,
+          views,
           world,
         };
         setIsReady(true);
@@ -789,78 +968,53 @@ export default function BimStreamer({
     [],
   );
 
-  const clearProjectionDrawing = useCallback(() => {
+  const resetViews = useCallback(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
 
-    runtime.projectionDrawing?.dispose();
-    runtime.projectionDrawing = null;
-    runtime.projectionKey = null;
+    resetViewCatalog(runtime);
+    setViewCatalog([]);
   }, []);
 
-  const ensureProjectionDrawing = useCallback(
+  const ensureViewCatalog = useCallback(
     async (runtime: Runtime) => {
       const loadedModelIds = getLoadedModelIds(runtime, currentModels);
-      if (!loadedModelIds.length) {
-        throw new Error("Load a model before switching to 2D.");
+      const modelsKey = loadedModelIds.join("|");
+      if (runtime.viewCatalogModelsKey === modelsKey) {
+        return runtime.viewCatalog;
       }
 
-      const projectionKey = loadedModelIds.join("|");
-      const bounds = getProjectModelBounds(runtime, currentModels);
-      if (runtime.projectionDrawing && runtime.projectionKey === projectionKey) {
-        return { bounds, drawing: runtime.projectionDrawing };
+      // buildViewCatalog clears and recreates every OBC.Views entry, so two
+      // overlapping builds (e.g. React StrictMode's double effect run, or two
+      // models finishing loading in quick succession) would race and corrupt
+      // each other's output. Share one in-flight build per models signature.
+      if (
+        runtime.viewCatalogBuildPromise &&
+        runtime.viewCatalogBuildKey === modelsKey
+      ) {
+        return runtime.viewCatalogBuildPromise;
       }
 
-      runtime.projectionDrawing?.dispose();
-      runtime.projectionDrawing = null;
-      runtime.projectionKey = null;
-
-      const drawing = runtime.components
-        .get<TechnicalDrawings>(runtime.OBC.TechnicalDrawings)
-        .create(runtime.world);
-      drawing.three.visible = false;
-      drawing.orientTo(new runtime.THREE.Vector3(0, -1, 0));
-
-      if (bounds) {
-        const center = bounds.getCenter(new runtime.THREE.Vector3());
-        const size = bounds.getSize(new runtime.THREE.Vector3());
-        const topMargin = Math.max(size.y * 0.06, 0.5);
-        drawing.three.position.set(center.x, bounds.max.y + topMargin, center.z);
-        drawing.far = Math.max(size.y + topMargin * 2, 20);
-      }
-
-      drawing.layers.create(PROJECTION_LAYERS.visible, {
-        material: new runtime.THREE.LineBasicMaterial({
-          color: 0x17211d,
-          depthTest: false,
-        }),
-      });
-      drawing.layers.create(PROJECTION_LAYERS.hidden, {
-        material: new runtime.THREE.LineBasicMaterial({
-          color: 0x8a8f98,
-          depthTest: false,
-          opacity: 0.36,
-          transparent: true,
-        }),
-      });
-
-      await drawing.addProjectionFromItems(
-        await getProjectModelIdMap(runtime, currentModels),
-        {
-          layers: PROJECTION_LAYERS,
+      const buildPromise = buildViewCatalog(runtime, currentModels).then(
+        (catalog) => {
+          if (runtime.viewCatalogBuildPromise === buildPromise) {
+            runtime.viewCatalogBuildPromise = null;
+            runtime.viewCatalogBuildKey = null;
+          }
+          setViewCatalog(catalog);
+          return catalog;
         },
       );
-
-      runtime.projectionDrawing = drawing;
-      runtime.projectionKey = projectionKey;
-      return { bounds, drawing };
+      runtime.viewCatalogBuildPromise = buildPromise;
+      runtime.viewCatalogBuildKey = modelsKey;
+      return buildPromise;
     },
     [currentModels],
   );
 
-  const switchViewMode = useCallback(
+  const selectView = useCallback(
     async (
-      nextIs2DView: boolean,
+      nextViewId: string | null,
       historyUpdateMode?: HistoryUpdateMode,
     ) => {
       const runtime = runtimeRef.current;
@@ -872,10 +1026,10 @@ export default function BimStreamer({
 
       setProjectionError(null);
 
-      if (!nextIs2DView) {
+      if (nextViewId === null) {
         setProjectModelsVisible(runtime, currentModels, true);
-        if (runtime.projectionDrawing) {
-          runtime.projectionDrawing.three.visible = false;
+        for (const drawing of runtime.drawings.values()) {
+          drawing.three.visible = false;
         }
 
         runtime.world.camera.set("Orbit");
@@ -886,7 +1040,7 @@ export default function BimStreamer({
           true,
         );
         runtime.fragments.core.update(true);
-        setIs2DView(false);
+        setActiveViewId(null);
         return;
       }
 
@@ -898,44 +1052,62 @@ export default function BimStreamer({
           throw new Error("Load a model before switching to 2D.");
         }
 
+        await ensureViewCatalog(runtime);
+        const view = runtime.views.list.get(nextViewId);
+        if (!view) {
+          throw new Error("That view is no longer available.");
+        }
+
         const bounds = getProjectModelBounds(runtime, currentModels);
         const center = bounds?.getCenter(new runtime.THREE.Vector3());
         const size = bounds?.getSize(new runtime.THREE.Vector3());
         const viewSize = size ? Math.max(size.x, size.y, size.z, 24) : 40;
 
         setProjectModelsVisible(runtime, currentModels, true);
-        if (runtime.projectionDrawing) {
-          runtime.projectionDrawing.three.visible = false;
+        for (const drawing of runtime.drawings.values()) {
+          drawing.three.visible = false;
         }
 
         await runtime.world.camera.projection.set("Orthographic");
         runtime.world.camera.set("Plan");
-        if (center) {
-          await runtime.world.camera.controls.setLookAt(
-            center.x,
-            center.y + viewSize * 1.75,
-            center.z,
-            center.x,
-            center.y,
-            center.z,
-            true,
+
+        const target = center
+          ? view.plane.projectPoint(center, new runtime.THREE.Vector3())
+          : view.plane.normal.clone().multiplyScalar(-view.plane.constant);
+        const eye = target
+          .clone()
+          .addScaledVector(
+            view.plane.normal.clone().negate(),
+            viewSize * 1.75,
           );
-        }
+        await runtime.world.camera.controls.setLookAt(
+          eye.x,
+          eye.y,
+          eye.z,
+          target.x,
+          target.y,
+          target.z,
+          true,
+        );
 
         const meshes = collectProjectMeshes(runtime, currentModels);
         if (meshes.length) {
           await runtime.world.camera.fit(meshes, 1.25);
         }
 
-        const { drawing } = await ensureProjectionDrawing(runtime);
+        const drawing = await ensureDrawingForView(
+          runtime,
+          currentModels,
+          view,
+        );
         setProjectModelsVisible(runtime, currentModels, false);
         drawing.three.visible = true;
         runtime.fragments.core.update(true);
-        setIs2DView(true);
+        setActiveViewId(nextViewId);
       } catch (error) {
         setProjectModelsVisible(runtime, currentModels, true);
-        if (runtime.projectionDrawing) {
-          runtime.projectionDrawing.three.visible = false;
+        for (const drawing of runtime.drawings.values()) {
+          drawing.three.visible = false;
         }
         runtime.world.camera.set("Orbit");
         await runtime.world.camera.projection.set("Perspective");
@@ -947,22 +1119,22 @@ export default function BimStreamer({
         setProjectionError(
           error instanceof Error
             ? error.message
-            : "The 2D projection could not be generated.",
+            : "That 2D view could not be generated.",
         );
-        setIs2DView(false);
+        setActiveViewId(null);
       } finally {
         setIsProjecting2D(false);
       }
     },
-    [currentModels, ensureProjectionDrawing, isProjecting2D],
+    [currentModels, ensureViewCatalog, isProjecting2D],
   );
 
   const loadModel = useCallback(
     async (model: DemoModel) => {
       const runtime = runtimeRef.current;
       if (!runtime || modelStates[model.id].status === "streaming") return;
-      clearProjectionDrawing();
-      setIs2DView(false);
+      resetViews();
+      setActiveViewId(null);
       setProjectionError(null);
 
       if (!model.url) {
@@ -1024,14 +1196,14 @@ export default function BimStreamer({
         });
       }
     },
-    [clearProjectionDrawing, getAuthToken, modelStates, setModelState],
+    [getAuthToken, modelStates, resetViews, setModelState],
   );
 
   const unloadAllModels = useCallback(async () => {
     const runtime = runtimeRef.current;
     if (runtime) {
-      clearProjectionDrawing();
-      setIs2DView(false);
+      resetViews();
+      setActiveViewId(null);
       setProjectionError(null);
 
       for (const model of MODELS) {
@@ -1044,7 +1216,7 @@ export default function BimStreamer({
 
     setActiveModelId(null);
     setModelStates(initialModelState());
-  }, [clearProjectionDrawing]);
+  }, [resetViews]);
 
   const switchProject = async (project: ProjectId) => {
     if (project !== activeProjectId || activeSection !== "viewer") {
@@ -1129,13 +1301,37 @@ export default function BimStreamer({
   ]);
 
   useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !isReady) return;
+
+    const loadedModelIds = getLoadedModelIds(runtime, currentModels);
+    if (!loadedModelIds.length) {
+      if (runtime.viewCatalog.length) {
+        resetViews();
+      }
+      return;
+    }
+
+    if (runtime.viewCatalogModelsKey === loadedModelIds.join("|")) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void ensureViewCatalog(runtime);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeCount, currentModels, ensureViewCatalog, isReady, resetViews]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handlePopState = () => {
       const routeState = parseRouteState();
       suppressNextRouteWriteRef.current = true;
       pendingRouteCameraRef.current = routeState.camera;
-      pendingRouteViewModeRef.current = routeState.viewMode;
+      pendingRouteViewRef.current =
+        routeState.viewMode === "2d"
+          ? { mode: "2d", id: routeState.view2dId }
+          : { mode: "3d" };
       setProjectionError(null);
 
       const applyRouteProject = async () => {
@@ -1162,37 +1358,52 @@ export default function BimStreamer({
   }, [activeProjectId, canShowApplicationSettings, unloadAllModels]);
 
   useEffect(() => {
-    const requestedViewMode = pendingRouteViewModeRef.current;
-    if (!requestedViewMode || !isReady || isProjecting2D) return;
+    const pending = pendingRouteViewRef.current;
+    if (!pending || !isReady || isProjecting2D) return;
 
-    if (requestedViewMode === "2d") {
+    if (pending.mode === "3d") {
+      pendingRouteViewRef.current = null;
       if (is2DView) {
-        pendingRouteViewModeRef.current = null;
-        return;
+        const timeoutId = window.setTimeout(() => {
+          void selectView(null);
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
       }
-
-      if (!canToggle2D) return;
-
-      pendingRouteViewModeRef.current = null;
-      const timeoutId = window.setTimeout(() => {
-        void switchViewMode(true);
-      }, 0);
-      return () => window.clearTimeout(timeoutId);
+      return;
     }
 
-    pendingRouteViewModeRef.current = null;
-    if (is2DView) {
-      const timeoutId = window.setTimeout(() => {
-        void switchViewMode(false);
-      }, 0);
-      return () => window.clearTimeout(timeoutId);
+    if (is2DView && (pending.id === null || activeViewId === pending.id)) {
+      pendingRouteViewRef.current = null;
+      return;
     }
-  }, [canToggle2D, is2DView, isProjecting2D, isReady, switchViewMode]);
+
+    if (!canToggle2D) return;
+    if (!viewCatalog.length) return;
+
+    const requestedId =
+      pending.id && viewCatalog.some((entry) => entry.id === pending.id)
+        ? pending.id
+        : viewCatalog[0].id;
+
+    pendingRouteViewRef.current = null;
+    const timeoutId = window.setTimeout(() => {
+      void selectView(requestedId);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    activeViewId,
+    canToggle2D,
+    is2DView,
+    isProjecting2D,
+    isReady,
+    selectView,
+    viewCatalog,
+  ]);
 
   useEffect(() => {
     const camera = pendingRouteCameraRef.current;
     if (!camera || !isReady) return;
-    if (pendingRouteViewModeRef.current === "2d" && !is2DView) return;
+    if (pendingRouteViewRef.current?.mode === "2d" && !is2DView) return;
 
     pendingRouteCameraRef.current = null;
     const timeoutId = window.setTimeout(() => {
@@ -1294,30 +1505,54 @@ export default function BimStreamer({
                 <strong>{activeModel?.name ?? activeProject?.label ?? APP_NAME}</strong>
               </div>
               <div className="viewer-toolbar-actions">
-                <button
-                  aria-label={
-                    is2DView
-                      ? "Switch to 3D view"
-                      : "Switch to 2D projection view"
-                  }
-                  aria-pressed={is2DView}
-                  className="view-mode-toggle"
-                  disabled={!canToggle2D || isProjecting2D}
-                  onClick={() => void switchViewMode(!is2DView, "push")}
-                  title={is2DView ? "3D view" : "2D projection view"}
-                  type="button"
+                <label
+                  className={`view-mode-picker${is2DView ? " is-2d" : ""}`}
+                  title={is2DView ? "2D view" : "3D view"}
                 >
                   {isProjecting2D ? (
                     <LoaderCircle className="icon spin" aria-hidden="true" />
                   ) : is2DView ? (
-                    <Box className="icon" aria-hidden="true" />
-                  ) : (
                     <SquareStack className="icon" aria-hidden="true" />
+                  ) : (
+                    <Box className="icon" aria-hidden="true" />
                   )}
-                  <span className="view-mode-label">
-                    {is2DView ? "3D" : "2D"}
-                  </span>
-                </button>
+                  <select
+                    aria-label="Viewport mode"
+                    className="view-mode-select"
+                    disabled={!canToggle2D || isProjecting2D}
+                    onChange={(event) =>
+                      void selectView(
+                        event.target.value === "3d" ? null : event.target.value,
+                        "push",
+                      )
+                    }
+                    value={activeViewId ?? "3d"}
+                  >
+                    <option value="3d">3D</option>
+                    {viewCatalog.length > 0 ? (
+                      <>
+                        <optgroup label="Floor Plans">
+                          {viewCatalog
+                            .filter((entry) => entry.group === "Floor Plans")
+                            .map((entry) => (
+                              <option key={entry.id} value={entry.id}>
+                                {entry.label}
+                              </option>
+                            ))}
+                        </optgroup>
+                        <optgroup label="Elevations">
+                          {viewCatalog
+                            .filter((entry) => entry.group === "Elevations")
+                            .map((entry) => (
+                              <option key={entry.id} value={entry.id}>
+                                {entry.label}
+                              </option>
+                            ))}
+                        </optgroup>
+                      </>
+                    ) : null}
+                  </select>
+                </label>
                 {canShowProjectSettings ? (
                   <button
                     aria-label="Project settings"
