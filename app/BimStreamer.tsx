@@ -1758,6 +1758,18 @@ export default function BimStreamer({
     ) {
       setActiveModelId(preferredModelId);
     }
+
+    // The initial camera position is tuned for one specific model, so it
+    // doesn't generalize across projects of very different scale/origin —
+    // fit to the loaded geometry instead, unless a shared link is about to
+    // restore its own saved camera.
+    const runtime = runtimeRef.current;
+    if (runtime && !pendingRouteCameraRef.current) {
+      const meshes = collectProjectMeshes(runtime, currentModels);
+      if (meshes.length) {
+        await runtime.world.camera.fit(meshes, 1.25);
+      }
+    }
   }, [activeModelId, activeProjectId, currentModels, loadModel, modelStates]);
 
   useEffect(() => {
