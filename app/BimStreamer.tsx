@@ -554,22 +554,28 @@ function resetViewCatalog(runtime: Runtime) {
  * close to it. A real floor/roof level has a slab or structure right at its
  * elevation; an orphaned reference level sitting a fraction of a metre away
  * from the real level it shadows does not.
+ *
+ * Uses `FragmentsManager.getBBoxes()` (metadata-derived, per item) rather
+ * than walking the loaded THREE.Mesh tiles: a complex model's tiles stream
+ * into the scene progressively, so at the point the view catalog is built
+ * the visual geometry may not have arrived yet even though the model is
+ * fully loaded and its item data already queryable.
  */
-function getElevationsWithContent(
+async function getElevationsWithContent(
   runtime: Runtime,
   models: DemoModel[],
   elevations: number[],
   tolerance = 0.3,
-): Set<number> {
-  const meshes = collectProjectMeshes(runtime, models);
+): Promise<Set<number>> {
+  const itemMap = await getProjectModelIdMap(runtime, models);
+  const boxes = await runtime.fragments.getBBoxes(itemMap);
   const withContent = new Set<number>();
-  const box = new runtime.THREE.Box3();
 
   for (const elevation of elevations) {
-    const hasNearbyGeometry = meshes.some((mesh) => {
-      box.setFromObject(mesh);
-      return box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance;
-    });
+    const hasNearbyGeometry = boxes.some(
+      (box) =>
+        box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
+    );
     if (hasNearbyGeometry) withContent.add(elevation);
   }
 
@@ -625,7 +631,7 @@ async function buildViewCatalog(
   // elevation — real for the model, but not a meaningful floor plan. Falls
   // back to the unfiltered set if the check finds nothing with content at
   // all (e.g. models still mid-load) rather than showing zero floor plans.
-  const elevationsWithContent = getElevationsWithContent(
+  const elevationsWithContent = await getElevationsWithContent(
     runtime,
     models,
     [...uniqueStoreyViews.values()].map((view) => view.plane.constant),
