@@ -1010,8 +1010,10 @@ async function ensureDrawingForView(
   const cacheKey = getDrawingCacheKey(runtime, models, view);
   if (cacheKey) runtime.drawingCacheKeys.set(drawing, cacheKey);
   const cachedRecord = cacheKey ? await getCachedDrawing(cacheKey) : undefined;
+  console.log("[debug] cacheKey", cacheKey, "hit", !!cachedRecord);
 
   if (cachedRecord) {
+    console.time("[debug] cache-hit reconstruction");
     restoreDrawingAnnotations(runtime, drawing, cachedRecord.annotations);
 
     for (const layer of cachedRecord.layers) {
@@ -1028,6 +1030,7 @@ async function ensureDrawingForView(
         layer.layer,
       );
     }
+    console.timeEnd("[debug] cache-hit reconstruction");
   } else {
     await drawing.addProjectionFromItems(
       await getProjectableModelIdMap(runtime, models),
