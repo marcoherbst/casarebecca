@@ -564,6 +564,7 @@ async function getStoreyNamesWithContent(
 
   for (const model of getLoadedProjectModels(runtime, models)) {
     const tree = await model.getSpatialStructure();
+    console.log("[storeys] tree root", tree.category, tree.children?.length);
 
     const storeyNodes: SpatialTreeItem[] = [];
     const collectStoreys = (node: SpatialTreeItem) => {
@@ -573,6 +574,7 @@ async function getStoreyNamesWithContent(
       for (const child of node.children ?? []) collectStoreys(child);
     };
     collectStoreys(tree);
+    console.log("[storeys] found storey nodes", storeyNodes.length);
     if (!storeyNodes.length) continue;
 
     const countDescendants = (node: SpatialTreeItem): number =>
@@ -588,6 +590,15 @@ async function getStoreyNamesWithContent(
 
     storeyNodes.forEach((node, index) => {
       const nameAttribute = storeysData[index]?.Name;
+      const count = countDescendants(node);
+      console.log(
+        "[storeys] storey",
+        JSON.stringify(nameAttribute),
+        "descendants",
+        count,
+        "children",
+        node.children?.length,
+      );
       if (
         !nameAttribute ||
         Array.isArray(nameAttribute) ||
@@ -595,12 +606,13 @@ async function getStoreyNamesWithContent(
       ) {
         return;
       }
-      if (countDescendants(node) > 0) {
+      if (count > 0) {
         namesWithContent.add(String(nameAttribute.value));
       }
     });
   }
 
+  console.log("[storeys] namesWithContent", [...namesWithContent]);
   return namesWithContent;
 }
 
@@ -655,8 +667,16 @@ async function buildViewCatalog(
   // content (e.g. missing spatial-structure data) rather than showing zero
   // floor plans.
   const storeysWithContent = await getStoreyNamesWithContent(runtime, models);
+  console.log(
+    "[storeys] uniqueStoreyViews ids",
+    [...uniqueStoreyViews.keys()],
+  );
   const contentfulStoreyViews = [...uniqueStoreyViews.values()].filter(
     (view) => storeysWithContent.has(view.id),
+  );
+  console.log(
+    "[storeys] contentfulStoreyViews ids",
+    contentfulStoreyViews.map((v) => v.id),
   );
   if (contentfulStoreyViews.length) {
     for (const view of uniqueStoreyViews.values()) {
