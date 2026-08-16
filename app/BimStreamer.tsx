@@ -640,11 +640,20 @@ async function buildViewCatalog(
     `^(?:${loadedModelIds.map(escapeRegExp).join("|")})$`,
   );
   const bounds = getProjectModelBounds(runtime, models);
+  console.log(
+    "[storeys] model Y bounds",
+    bounds?.min.y,
+    "to",
+    bounds?.max.y,
+  );
   const catalog: ViewCatalogEntry[] = [];
 
   const storeyViews = await views.createFromIfcStoreys({
     modelIds: [modelIdPattern],
   });
+  for (const view of storeyViews) {
+    console.log("[storeys] view", view.id, "elevation", view.plane.constant);
+  }
 
   // Multi-discipline projects (e.g. architecture + structure) commonly reuse
   // the same storey names, so createFromIfcStoreys can hand back several
