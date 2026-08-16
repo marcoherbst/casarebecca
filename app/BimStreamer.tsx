@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  ArrowUpRight,
   Box,
   Building2,
+  Compass,
   Eye,
   EyeOff,
   Focus,
@@ -13,17 +15,22 @@ import {
   Layers3,
   ListTree,
   LoaderCircle,
+  MessageSquare,
   Orbit,
+  PenLine,
   RotateCcw,
   Ruler,
   Scan,
   Scissors,
   Settings,
+  Spline,
   SquareStack,
+  TrendingUp,
   TriangleAlert,
   UsersRound,
 } from "lucide-react";
 import type {
+  AnnotationSystem,
   Clipper,
   FragmentsManager,
   ModelIdMap,
@@ -36,7 +43,17 @@ import type {
   Views,
   World,
 } from "@thatopen/components";
-import type { AreaMeasurement, LengthMeasurement } from "@thatopen/components-front";
+import type {
+  AngleAnnotationsTool,
+  AreaMeasurement,
+  BlockAnnotationsTool,
+  CalloutAnnotationsTool,
+  DrawingEditor,
+  LeaderAnnotationsTool,
+  LengthMeasurement,
+  LinearAnnotationsTool,
+  SlopeAnnotationsTool,
+} from "@thatopen/components-front";
 import type { FragmentsModel, ItemData, RaycastResult } from "@thatopen/fragments";
 // Resolved to a same-origin build asset URL by Vite (see the `?url` suffix),
 // so the fragments worker no longer needs a network round trip to
@@ -54,6 +71,12 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type CachedLineLayer,
+  type SerializedAnnotation,
+  getCachedDrawing,
+  putCachedDrawing,
+} from "../lib/drawingCache";
 import { PROTECTED_MODEL_CATALOG } from "../modelCatalog";
 import CategoryTree from "./CategoryTree";
 import ElementInspector, { type SelectedElement } from "./ElementInspector";
@@ -65,7 +88,21 @@ type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
 type DashboardSection = "application-settings" | "home" | "viewer";
 type ViewMode = "2d" | "3d";
 type NavigationMode = "Orbit" | "FirstPerson";
-type ActiveTool = "none" | "section" | "length" | "area";
+type AnnotationToolKey =
+  | "linear-annotation"
+  | "angle-annotation"
+  | "leader-annotation"
+  | "callout-annotation"
+  | "block-annotation"
+  | "slope-annotation";
+type ActiveTool = "none" | "section" | "length" | "area" | AnnotationToolKey;
+type AnnotationToolConstructor =
+  | typeof LinearAnnotationsTool
+  | typeof AngleAnnotationsTool
+  | typeof LeaderAnnotationsTool
+  | typeof CalloutAnnotationsTool
+  | typeof BlockAnnotationsTool
+  | typeof SlopeAnnotationsTool;
 type HistoryUpdateMode = "push" | "replace";
 type ViewCatalogGroup = "Floor Plans" | "Elevations";
 
@@ -119,7 +156,10 @@ type InteractionState = {
 type Runtime = {
   FRAGS: typeof import("@thatopen/fragments");
   OBC: typeof import("@thatopen/components");
+  OBF: typeof import("@thatopen/components-front");
   THREE: typeof import("three");
+  annotationSystems: Record<AnnotationToolKey, AnnotationSystem<any>>;
+  annotationTools: Record<AnnotationToolKey, AnnotationToolConstructor>;
   categoryTree: CategoryTreeEntry[];
   categoryTreeBuildKey: string | null;
   categoryTreeBuildPromise: Promise<CategoryTreeEntry[]> | null;
@@ -127,11 +167,14 @@ type Runtime = {
   area: AreaMeasurement;
   clipper: Clipper;
   components: { dispose: () => void; get: <T>(component: unknown) => T };
+  drawingCacheKeys: Map<TechnicalDrawing, string>;
+  drawingEditor: DrawingEditor;
   drawings: Map<string, TechnicalDrawing>;
   fragments: FragmentsManager;
   hiddenKeys: Set<string>;
   interaction: InteractionState;
   length: LengthMeasurement;
+  modelLastModified: Map<string, string>;
   viewCatalog: ViewCatalogEntry[];
   viewCatalogBuildKey: string | null;
   viewCatalogBuildPromise: Promise<ViewCatalogEntry[]> | null;
@@ -218,6 +261,56 @@ const PROJECTION_LAYERS = {
   hidden: "projection-hidden",
   visible: "projection-visible",
 } as const;
+
+// Each annotation data type has its own Vector3-valued fields — listed here
+// so they can be flattened to/from plain {x,y,z} for storage (IndexedDB's
+// structured clone drops a custom class's prototype, so a stored
+// THREE.Vector3 comes back as a plain object anyway; this makes that
+// explicit and reversible on restore). `systemKey` is the stable tag
+// persisted alongside each annotation so restore knows which system it
+// belongs to.
+const ANNOTATION_SYSTEM_CONFIG: Record<
+  AnnotationToolKey,
+  { systemKey: string; vectorFields: string[] }
+> = {
+  "angle-annotation": {
+    systemKey: "angle",
+    vectorFields: ["pointA", "vertex", "pointB"],
+  },
+  "block-annotation": { systemKey: "block", vectorFields: ["position"] },
+  "callout-annotation": {
+    systemKey: "callout",
+    vectorFields: ["center", "elbow", "extensionEnd"],
+  },
+  "leader-annotation": {
+    systemKey: "leader",
+    vectorFields: ["arrowTip", "elbow", "extensionEnd"],
+  },
+  "linear-annotation": {
+    systemKey: "linear",
+    vectorFields: ["pointA", "pointB"],
+  },
+  "slope-annotation": {
+    systemKey: "slope",
+    vectorFields: ["position", "direction"],
+  },
+};
+const ANNOTATION_TOOL_KEYS = Object.keys(
+  ANNOTATION_SYSTEM_CONFIG,
+) as AnnotationToolKey[];
+
+const ANNOTATION_TOOL_BUTTONS: Array<{
+  Icon: typeof PenLine;
+  key: AnnotationToolKey;
+  label: string;
+}> = [
+  { Icon: PenLine, key: "linear-annotation", label: "Dimension" },
+  { Icon: Spline, key: "angle-annotation", label: "Angle" },
+  { Icon: ArrowUpRight, key: "leader-annotation", label: "Leader note" },
+  { Icon: MessageSquare, key: "callout-annotation", label: "Callout" },
+  { Icon: Compass, key: "block-annotation", label: "North arrow" },
+  { Icon: TrendingUp, key: "slope-annotation", label: "Slope" },
+];
 
 const APP_NAME = "Evercam Open";
 const EMPTY_PROJECT_SETTINGS: Record<string, ProjectSetting> = {};
@@ -786,10 +879,57 @@ async function fitCameraToBox(runtime: Runtime, box: THREE.Box3, offset = 1.1) {
 }
 
 /**
+ * A minimal north-arrow symbol (shaft + two barbs, in a drawing's local XZ
+ * plane) registered once as the built-in `BlockAnnotations` symbol — just
+ * enough to make the Block annotation tool usable without a real authored
+ * symbol library.
+ */
+function buildNorthArrowGeometry(THREE: typeof import("three")) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(
+      [
+        0, 0, -1, 0, 0, 1, 0, 0, 1, -0.3, 0, 0.5, 0, 0, 1, 0.3, 0, 0.5,
+      ],
+      3,
+    ),
+  );
+  return geometry;
+}
+
+/**
+ * Identifies a drawing's generated geometry across sessions: the loaded
+ * models it was projected from (each stamped with its Last-Modified value,
+ * so replacing a model file invalidates every drawing built from it) plus
+ * the view id. Returns null when nothing is loaded yet (nothing to cache).
+ */
+function getDrawingCacheKey(
+  runtime: Runtime,
+  models: DemoModel[],
+  view: View,
+): string | null {
+  const loadedModelIds = getLoadedModelIds(runtime, models);
+  if (!loadedModelIds.length) return null;
+
+  const stamped = loadedModelIds.map(
+    (id) => `${id}@${runtime.modelLastModified.get(id) ?? ""}`,
+  );
+  return `${stamped.join("|")}:${view.id}`;
+}
+
+/**
  * Builds (and caches) the `TechnicalDrawing` for a given `View` — the actual
  * vector line-art produced by projecting the loaded models onto that view's
  * plane. This is a distinct rendering technology from `OBC.Views` itself:
  * the view only supplies the cut plane and range used for the projection.
+ *
+ * Regenerating this via `EdgeProjector` (inside `addProjectionFromItems`) is
+ * slow on complex models and has no internal caching of its own, so the
+ * result is also persisted to IndexedDB (`lib/drawingCache.ts`) keyed by
+ * `getDrawingCacheKey` — a hit there reconstructs the same line geometry via
+ * `addProjectionLines` (the same public entry point `addProjectionFromItems`
+ * itself uses internally) without touching `EdgeProjector` at all.
  */
 async function ensureDrawingForView(
   runtime: Runtime,
@@ -824,13 +964,217 @@ async function ensureDrawingForView(
     }),
   });
 
-  await drawing.addProjectionFromItems(
-    await getProjectModelIdMap(runtime, models),
-    { layers: PROJECTION_LAYERS },
-  );
+  const cacheKey = getDrawingCacheKey(runtime, models, view);
+  if (cacheKey) runtime.drawingCacheKeys.set(drawing, cacheKey);
+  const cachedRecord = cacheKey ? await getCachedDrawing(cacheKey) : undefined;
+
+  if (cachedRecord) {
+    restoreDrawingAnnotations(runtime, drawing, cachedRecord.annotations);
+
+    for (const layer of cachedRecord.layers) {
+      const geometry = new runtime.THREE.BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new runtime.THREE.BufferAttribute(layer.positions, 3),
+      );
+      for (const group of layer.groups ?? []) {
+        geometry.addGroup(group.start, group.count, group.materialIndex);
+      }
+      drawing.addProjectionLines(
+        new runtime.THREE.LineSegments(geometry),
+        layer.layer,
+      );
+    }
+  } else {
+    await drawing.addProjectionFromItems(
+      await getProjectModelIdMap(runtime, models),
+      { layers: PROJECTION_LAYERS },
+    );
+
+    if (cacheKey) {
+      const layers: CachedLineLayer[] = [];
+      for (const child of drawing.three.children) {
+        const ls = child as THREE.LineSegments;
+        if (!ls.isLineSegments) continue;
+        const layerName = ls.userData.layer as string | undefined;
+        const position = ls.geometry.getAttribute("position");
+        if (!layerName || !position) continue;
+
+        layers.push({
+          groups: ls.geometry.groups.length
+            ? ls.geometry.groups.map(
+                (group: {
+                  count: number;
+                  materialIndex?: number;
+                  start: number;
+                }) => ({
+                  count: group.count,
+                  materialIndex: group.materialIndex ?? 0,
+                  start: group.start,
+                }),
+              )
+            : undefined,
+          layer: layerName,
+          positions: Float32Array.from(position.array as ArrayLike<number>),
+        });
+      }
+
+      putCachedDrawing(cacheKey, { annotations: [], layers }).catch(
+        (error) => {
+          console.warn("Failed to cache generated drawing", error);
+        },
+      );
+    }
+  }
 
   runtime.drawings.set(view.id, drawing);
   return drawing;
+}
+
+/**
+ * Leader and Callout are the two annotation tools that pause mid-placement
+ * for free text (their machine state becomes `"enteringText"` once their
+ * spatial points are placed) — every other tool completes purely from
+ * `editor.step()` clicks. `window.prompt` is a deliberately minimal v1: no
+ * custom text-entry UI exists yet.
+ */
+async function handleAnnotationClick(runtime: Runtime, tool: AnnotationToolKey) {
+  runtime.drawingEditor.step();
+
+  if (tool === "leader-annotation" || tool === "callout-annotation") {
+    const system = runtime.annotationSystems[tool] as unknown as {
+      machineState: { kind: string };
+      sendMachineEvent: (event: { type: "SUBMIT_TEXT"; text: string }) => void;
+    };
+    if (system.machineState.kind !== "enteringText") return;
+    const text = window.prompt("Annotation text:");
+    if (text) {
+      system.sendMachineEvent({ type: "SUBMIT_TEXT", text });
+    } else {
+      runtime.drawingEditor.cancel();
+    }
+  }
+}
+
+function serializeVectorFields(data: Record<string, unknown>, fields: string[]) {
+  const out = { ...data };
+  for (const field of fields) {
+    const vector = data[field] as
+      | { x: number; y: number; z: number }
+      | undefined;
+    if (vector) out[field] = { x: vector.x, y: vector.y, z: vector.z };
+  }
+  return out;
+}
+
+function reviveVectorFields(
+  THREE: typeof import("three"),
+  data: Record<string, unknown>,
+  fields: string[],
+) {
+  const out = { ...data };
+  for (const field of fields) {
+    const vector = data[field] as
+      | { x: number; y: number; z: number }
+      | undefined;
+    if (vector) out[field] = new THREE.Vector3(vector.x, vector.y, vector.z);
+  }
+  return out;
+}
+
+/**
+ * Re-serializes a drawing's full annotation set (across all 6 systems) into
+ * its IndexedDB cache record, preserving whatever line geometry is already
+ * there. Called after every annotation create/edit/delete so annotations
+ * survive a reload the same way the drawing's geometry does.
+ */
+async function persistDrawingAnnotations(
+  runtime: Runtime,
+  drawing: TechnicalDrawing,
+  cacheKey: string,
+) {
+  const existing = await getCachedDrawing(cacheKey);
+
+  const configBySystem = new Map(
+    ANNOTATION_TOOL_KEYS.map((key) => [
+      runtime.annotationSystems[key] as unknown,
+      ANNOTATION_SYSTEM_CONFIG[key],
+    ]),
+  );
+
+  const annotations: SerializedAnnotation[] = [];
+  for (const [uuid, entry] of drawing.annotations) {
+    const config = configBySystem.get(entry.system);
+    if (!config) continue;
+    annotations.push({
+      data: serializeVectorFields(
+        entry.data as Record<string, unknown>,
+        config.vectorFields,
+      ),
+      systemKey: config.systemKey,
+      uuid,
+    });
+  }
+
+  await putCachedDrawing(cacheKey, {
+    annotations,
+    layers: existing?.layers ?? [],
+  });
+}
+
+/**
+ * Rebuilds saved annotations onto a freshly-built (cache-hit) drawing.
+ *
+ * No system exposes a public "build from saved data" method — only the
+ * interactive state machine. `_buildGroup` is the one non-public API this
+ * relies on: a pure `(data, style) -> THREE.Group` renderer every system
+ * already uses internally for interactive commits, so reusing it here for a
+ * rebuild-from-data path is low-risk today, but a future `@thatopen/components`
+ * upgrade could rename or change it without warning — creating/editing
+ * annotations interactively is unaffected either way (that path never calls
+ * this). Failures are caught per-entry so one bad annotation can't break the
+ * rest of the drawing.
+ */
+function restoreDrawingAnnotations(
+  runtime: Runtime,
+  drawing: TechnicalDrawing,
+  annotations: SerializedAnnotation[],
+) {
+  const toolKeyBySystemKey = new Map(
+    ANNOTATION_TOOL_KEYS.map((key) => [
+      ANNOTATION_SYSTEM_CONFIG[key].systemKey,
+      key,
+    ]),
+  );
+
+  for (const entry of annotations) {
+    try {
+      const toolKey = toolKeyBySystemKey.get(entry.systemKey);
+      if (!toolKey) continue;
+
+      const config = ANNOTATION_SYSTEM_CONFIG[toolKey];
+      const system = runtime.annotationSystems[toolKey];
+      const data = reviveVectorFields(
+        runtime.THREE,
+        entry.data as Record<string, unknown>,
+        config.vectorFields,
+      );
+      const styleName = (data as { style?: string }).style ?? "default";
+      const style = system.styles.get(styleName) ?? system.styles.get("default");
+      if (!style) continue;
+
+      const buildGroup = (
+        system as unknown as {
+          _buildGroup: (item: unknown, style: unknown) => THREE.Group;
+        }
+      )._buildGroup;
+      const group = buildGroup.call(system, data, style);
+      drawing.three.add(group);
+      drawing.annotations.set(entry.uuid, { data, system, three: group });
+    } catch (error) {
+      console.warn("Failed to restore a cached annotation", entry, error);
+    }
+  }
 }
 
 const HOVER_COLOR = "#f2a93b";
@@ -1117,6 +1461,7 @@ async function streamModel(
     throw new Error(`Could not stream ${url}`);
   }
 
+  const lastModified = response.headers.get("last-modified");
   const bytesTotal = Number(response.headers.get("content-length")) || 0;
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -1139,7 +1484,7 @@ async function streamModel(
   }
 
   onProgress(bytesLoaded, bytesTotal || bytesLoaded);
-  return buffer.buffer;
+  return { buffer: buffer.buffer, lastModified };
 }
 
 export default function BimStreamer({
@@ -1483,10 +1828,77 @@ export default function BimStreamer({
         area.world = world;
         area.enabled = false;
 
+        const drawingEditor = components.get<DrawingEditor>(
+          OBF.DrawingEditor,
+        );
+        // Font used to render dimension/label text on annotations — three's
+        // TTFLoader (which this wraps) needs a raw .ttf, not woff/typeface.json.
+        await drawingEditor.fonts.load("/fonts/PlusJakartaSans-Medium.ttf");
+
+        const techDrawings = components.get<TechnicalDrawings>(
+          OBC.TechnicalDrawings,
+        );
+
+        // One built-in symbol so the Block tool is usable without a real
+        // authored symbol library.
+        techDrawings
+          .use(OBC.BlockAnnotations)
+          .define("NORTH_ARROW", { lines: buildNorthArrowGeometry(THREE) });
+
+        // Slope annotations derive their value from the real 3D geometry —
+        // needs the world registered once for raycasting.
+        drawingEditor
+          .use(OBF.SlopeAnnotationsTool)
+          .addWorld(world, components, () => {});
+
+        const annotationTools: Runtime["annotationTools"] = {
+          "angle-annotation": OBF.AngleAnnotationsTool,
+          "block-annotation": OBF.BlockAnnotationsTool,
+          "callout-annotation": OBF.CalloutAnnotationsTool,
+          "leader-annotation": OBF.LeaderAnnotationsTool,
+          "linear-annotation": OBF.LinearAnnotationsTool,
+          "slope-annotation": OBF.SlopeAnnotationsTool,
+        };
+        const annotationSystems: Runtime["annotationSystems"] = {
+          "angle-annotation": techDrawings.use(OBC.AngleAnnotations),
+          "block-annotation": techDrawings.use(OBC.BlockAnnotations),
+          "callout-annotation": techDrawings.use(OBC.CalloutAnnotations),
+          "leader-annotation": techDrawings.use(OBC.LeaderAnnotations),
+          "linear-annotation": techDrawings.use(OBC.LinearAnnotations),
+          "slope-annotation": techDrawings.use(OBC.SlopeAnnotations),
+        };
+        const drawingCacheKeys = new Map<TechnicalDrawing, string>();
+
+        // Annotation systems are global (shared across every drawing), and
+        // their onUpdate/onDelete events don't say which drawing changed —
+        // but editing only ever happens on the currently active one (the
+        // click/key handling effect only runs while a drawing is shown), so
+        // re-persisting whichever drawing is currently active on every
+        // create/edit/delete is sufficient to keep the cache in sync.
+        const persistActiveDrawingAnnotations = () => {
+          const drawing = drawingEditor.activeDrawing;
+          if (!drawing) return;
+          const cacheKey = drawingCacheKeys.get(drawing);
+          if (!cacheKey) return;
+          void persistDrawingAnnotations(
+            runtimeRef.current as Runtime,
+            drawing,
+            cacheKey,
+          );
+        };
+        for (const system of Object.values(annotationSystems)) {
+          system.onCommit.add(persistActiveDrawingAnnotations);
+          system.onUpdate.add(persistActiveDrawingAnnotations);
+          system.onDelete.add(persistActiveDrawingAnnotations);
+        }
+
         runtimeRef.current = {
           FRAGS,
           OBC,
+          OBF,
           THREE,
+          annotationSystems,
+          annotationTools,
           area,
           categoryTree: [],
           categoryTreeBuildKey: null,
@@ -1494,6 +1906,8 @@ export default function BimStreamer({
           categoryTreeModelsKey: null,
           clipper,
           components,
+          drawingCacheKeys,
+          drawingEditor,
           drawings: new Map(),
           fragments,
           hiddenKeys: new Set(),
@@ -1505,6 +1919,7 @@ export default function BimStreamer({
             selectedMap: null,
           },
           length,
+          modelLastModified: new Map(),
           viewCatalog: [],
           viewCatalogBuildKey: null,
           viewCatalogBuildPromise: null,
@@ -1576,6 +1991,10 @@ export default function BimStreamer({
     runtime.clipper.enabled = tool === "section";
     runtime.length.enabled = tool === "length";
     runtime.area.enabled = tool === "area";
+    runtime.drawingEditor.activeTool =
+      tool in runtime.annotationTools
+        ? runtime.annotationTools[tool as AnnotationToolKey]
+        : null;
     setActiveTool(tool);
   }, []);
 
@@ -1817,6 +2236,7 @@ export default function BimStreamer({
         for (const drawing of runtime.drawings.values()) {
           drawing.three.visible = false;
         }
+        runtime.drawingEditor.activeDrawing = null;
 
         runtime.world.camera.set("Orbit");
         setNavigationModeState("Orbit");
@@ -1892,6 +2312,8 @@ export default function BimStreamer({
         );
         setProjectModelsVisible(runtime, currentModels, false);
         drawing.three.visible = true;
+        runtime.drawingEditor.activeDrawing = drawing;
+        runtime.drawingEditor.setSource(runtime.world);
 
         // camera.fit() above always folds the hidden 3D models' bounds back
         // in (see fitCameraToObject's docstring), so it can't frame the
@@ -1904,6 +2326,7 @@ export default function BimStreamer({
         for (const drawing of runtime.drawings.values()) {
           drawing.three.visible = false;
         }
+        runtime.drawingEditor.activeDrawing = null;
         runtime.world.camera.set("Orbit");
         setNavigationModeState("Orbit");
         await runtime.world.camera.projection.set("Perspective");
@@ -1960,7 +2383,7 @@ export default function BimStreamer({
           status: "streaming",
         });
 
-        const buffer = await streamModel(
+        const { buffer, lastModified } = await streamModel(
           model.url,
           (bytesLoaded, bytesTotal) => {
             setModelState(model.id, {
@@ -1973,6 +2396,9 @@ export default function BimStreamer({
           },
         );
         const streamedBytes = buffer.byteLength;
+        if (lastModified) {
+          runtime.modelLastModified.set(model.id, lastModified);
+        }
 
         // fragments.list.onItemSet (wired in initViewer) already calls
         // core.update(true) as soon as this model is added to the list,
@@ -2281,6 +2707,43 @@ export default function BimStreamer({
       canvas.removeEventListener("dblclick", onDoubleClick);
       window.removeEventListener("keydown", onKeydown);
       canvas.style.cursor = "default";
+    };
+  }, [activeTool, is2DView, isReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !isReady ||
+      !is2DView ||
+      !(activeTool in runtime.annotationTools)
+    ) {
+      return;
+    }
+
+    const tool = activeTool as AnnotationToolKey;
+    const canvas = runtime.world.renderer.three.domElement;
+
+    const onClick = () => {
+      void handleAnnotationClick(runtime, tool);
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        runtime.drawingEditor.delete();
+      } else if (event.key === "Escape") {
+        runtime.drawingEditor.cancel();
+      }
+    };
+
+    canvas.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKeydown);
+    canvas.style.cursor = "crosshair";
+
+    return () => {
+      canvas.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKeydown);
+      canvas.style.cursor = "default";
+      runtime.drawingEditor.cancel();
     };
   }, [activeTool, is2DView, isReady]);
 
@@ -2688,6 +3151,29 @@ export default function BimStreamer({
                     >
                       <RotateCcw className="icon" aria-hidden="true" />
                     </button>
+                  </>
+                ) : null}
+                {is2DView ? (
+                  <>
+                    <span aria-hidden="true" className="toolbar-divider" />
+                    {ANNOTATION_TOOL_BUTTONS.map(({ Icon, key, label }) => (
+                      <button
+                        aria-label={
+                          activeTool === key ? `Stop ${label}` : `Add ${label}`
+                        }
+                        aria-pressed={activeTool === key}
+                        className="nav-mode-toggle"
+                        disabled={!isReady}
+                        key={key}
+                        onClick={() =>
+                          setActiveToolMode(activeTool === key ? "none" : key)
+                        }
+                        title={label}
+                        type="button"
+                      >
+                        <Icon className="icon" aria-hidden="true" />
+                      </button>
+                    ))}
                   </>
                 ) : null}
                 {canShowProjectSettings ? (
