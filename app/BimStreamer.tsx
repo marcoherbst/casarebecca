@@ -667,6 +667,14 @@ function escapeRegExp(value: string) {
 }
 
 function resetViewCatalog(runtime: Runtime) {
+  // Detach the editor before disposing — its activeDrawing setter tears down
+  // internal state against whichever drawing was previously active, so if
+  // that drawing is disposed first, switching projects while a 2D view was
+  // open throws (confirmed: "Cannot read properties of null (reading
+  // 'dispose')" when the editor later tries to let go of an already-disposed
+  // drawing's internals).
+  runtime.drawingEditor.activeDrawing = null;
+
   for (const drawing of runtime.drawings.values()) {
     drawing.dispose();
   }
