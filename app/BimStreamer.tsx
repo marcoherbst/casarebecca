@@ -37,7 +37,12 @@ import type {
   World,
 } from "@thatopen/components";
 import type { AreaMeasurement, LengthMeasurement } from "@thatopen/components-front";
-import type { FragmentsModel, ItemData, RaycastResult } from "@thatopen/fragments";
+import type {
+  FragmentsModel,
+  ItemData,
+  RaycastResult,
+  SpatialTreeItem,
+} from "@thatopen/fragments";
 // Resolved to a same-origin build asset URL by Vite (see the `?url` suffix),
 // so the fragments worker no longer needs a network round trip to
 // unpkg.com on every session — OBC.FragmentsManager.getWorker() fetches the
@@ -541,6 +546,65 @@ function resetViewCatalog(runtime: Runtime) {
 }
 
 /**
+ * Real-world IFC/Revit models routinely define more storeys than a building
+ * actually has floors at — reference datums (a site benchmark, a roof or
+ * parapet coordination plane) that the architect never assigned any element
+ * to. `createFromIfcStoreys` has no way to know the difference; it turns
+ * every `IfcBuildingStorey` into a floor plan candidate regardless. This
+ * checks each storey's real IFC spatial containment (via
+ * `FragmentsModel.getSpatialStructure()`) and returns the set of storey
+ * names that actually contain at least one element, so empty reference
+ * levels can be filtered out of the floor plan list.
+ */
+async function getStoreyNamesWithContent(
+  runtime: Runtime,
+  models: DemoModel[],
+): Promise<Set<string>> {
+  const namesWithContent = new Set<string>();
+
+  for (const model of getLoadedProjectModels(runtime, models)) {
+    const tree = await model.getSpatialStructure();
+
+    const storeyNodes: SpatialTreeItem[] = [];
+    const collectStoreys = (node: SpatialTreeItem) => {
+      if (/BUILDINGSTOREY/.test(node.category ?? "")) {
+        storeyNodes.push(node);
+      }
+      for (const child of node.children ?? []) collectStoreys(child);
+    };
+    collectStoreys(tree);
+    if (!storeyNodes.length) continue;
+
+    const countDescendants = (node: SpatialTreeItem): number =>
+      (node.children ?? []).reduce(
+        (sum, child) => sum + 1 + countDescendants(child),
+        0,
+      );
+
+    const storeyLocalIds = storeyNodes
+      .map((node) => node.localId)
+      .filter((id): id is number => id !== null);
+    const storeysData = await model.getItemsData(storeyLocalIds);
+
+    storeyNodes.forEach((node, index) => {
+      const nameAttribute = storeysData[index]?.Name;
+      if (
+        !nameAttribute ||
+        Array.isArray(nameAttribute) ||
+        !("value" in nameAttribute)
+      ) {
+        return;
+      }
+      if (countDescendants(node) > 0) {
+        namesWithContent.add(String(nameAttribute.value));
+      }
+    });
+  }
+
+  return namesWithContent;
+}
+
+/**
  * Generates the app's standard set of `OBC.Views` — cut planes with a name,
  * normal, and height range (one per IFC building storey, falling back to a
  * single overall plan when storey metadata isn't available, e.g. the bundled
@@ -584,8 +648,26 @@ async function buildViewCatalog(
     uniqueStoreyViews.set(view.id, view);
   }
 
-  if (uniqueStoreyViews.size) {
-    const sorted = [...uniqueStoreyViews.values()].sort(
+  // Drop storeys that are pure reference datums (a site benchmark, a roof
+  // coordination plane) with no elements actually assigned to them in the
+  // source IFC — real for the model, but not a meaningful floor plan. Falls
+  // back to the unfiltered set if the check somehow finds nothing with
+  // content (e.g. missing spatial-structure data) rather than showing zero
+  // floor plans.
+  const storeysWithContent = await getStoreyNamesWithContent(runtime, models);
+  const contentfulStoreyViews = [...uniqueStoreyViews.values()].filter(
+    (view) => storeysWithContent.has(view.id),
+  );
+  if (contentfulStoreyViews.length) {
+    for (const view of uniqueStoreyViews.values()) {
+      if (!storeysWithContent.has(view.id)) view.dispose();
+    }
+  } else {
+    contentfulStoreyViews.push(...uniqueStoreyViews.values());
+  }
+
+  if (contentfulStoreyViews.length) {
+    const sorted = contentfulStoreyViews.sort(
       (a, b) => a.plane.constant - b.plane.constant,
     );
 
