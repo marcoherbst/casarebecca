@@ -619,6 +619,49 @@ async function getProjectModelIdMap(runtime: Runtime, models: DemoModel[]) {
   return modelIdMap;
 }
 
+/**
+ * Same item set as `getProjectModelIdMap`, minus a handful of degenerate
+ * placeholder items (a site boundary, a project-wide proxy) whose bounding
+ * box spans orders of magnitude more than any real building element.
+ * `EdgeProjector`'s hidden-line computation mixes every item's geometry into
+ * one BVH; one item that dwarfs everything else makes that pathologically
+ * slow (confirmed on Casa Rebecca: a single item with an ~8300-unit bbox
+ * diagonal against a ~3.5-unit median made the projection never complete).
+ * Same exclusion heuristic already used by `getElevationsWithContent`
+ * (median-relative outlier size), generalized from just Y-height to the
+ * full 3D bbox diagonal since a degenerate item can dominate on any axis.
+ */
+async function getProjectableModelIdMap(
+  runtime: Runtime,
+  models: DemoModel[],
+): Promise<ModelIdMap> {
+  const itemMap = await getProjectModelIdMap(runtime, models);
+
+  const entries: { localId: number; modelId: string }[] = [];
+  for (const [modelId, localIds] of Object.entries(itemMap)) {
+    for (const localId of localIds) {
+      entries.push({ localId, modelId });
+    }
+  }
+  if (!entries.length) return itemMap;
+
+  const boxes = await runtime.fragments.getBBoxes(itemMap);
+  const sizes = boxes.map((box) => box.getSize(new runtime.THREE.Vector3()).length());
+  const sorted = [...sizes].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] || 1;
+  const maxReasonableSize = Math.max(median * 20, 5);
+
+  const filtered: ModelIdMap = {};
+  entries.forEach((entry, index) => {
+    if (sizes[index] > maxReasonableSize) return;
+    const set = filtered[entry.modelId] ?? new Set<number>();
+    set.add(entry.localId);
+    filtered[entry.modelId] = set;
+  });
+
+  return filtered;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -986,31 +1029,10 @@ async function ensureDrawingForView(
       );
     }
   } else {
-    const itemMap = await getProjectModelIdMap(runtime, models);
-    // debug: bbox size sanity check
-    try {
-      const boxes = await runtime.fragments.getBBoxes(itemMap);
-      const sizes = boxes.map((box) => {
-        const size = box.getSize(new runtime.THREE.Vector3());
-        return size.length();
-      });
-      const sorted = [...sizes].sort((a, b) => b - a);
-      console.log(
-        "[debug] item count",
-        sizes.length,
-        "top 5 bbox diagonals",
-        sorted.slice(0, 5),
-        "median",
-        sorted[Math.floor(sorted.length / 2)],
-      );
-    } catch (error) {
-      console.log("[debug] bbox check failed", error);
-    }
-    console.time("[debug] addProjectionFromItems");
-    await drawing.addProjectionFromItems(itemMap, {
-      layers: PROJECTION_LAYERS,
-    });
-    console.timeEnd("[debug] addProjectionFromItems");
+    await drawing.addProjectionFromItems(
+      await getProjectableModelIdMap(runtime, models),
+      { layers: PROJECTION_LAYERS },
+    );
 
     if (cacheKey) {
       const layers: CachedLineLayer[] = [];
