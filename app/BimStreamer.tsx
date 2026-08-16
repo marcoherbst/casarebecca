@@ -541,19 +541,27 @@ function resetViewCatalog(runtime: Runtime) {
 }
 
 /**
- * Real-world IFC/Revit models routinely define more storeys than a building
- * actually has floors at — most often leftover default levels a Revit
- * project template ships with (e.g. "Level 3"/"Level 4") that the architect
- * never deleted after adding their own named levels, plus the odd site
- * benchmark ("Sea Level"). `createFromIfcStoreys` has no way to know the
- * difference; it turns every `IfcBuildingStorey` into a floor plan candidate
- * regardless. `FragmentsModel.getSpatialStructure()` would be the correct
- * signal (real IFC spatial containment), but it comes back essentially
- * empty for at least one real converted model this app serves — so this
- * instead checks, per candidate elevation, whether any actual geometry sits
- * close to it. A real floor/roof level has a slab or structure right at its
- * elevation; an orphaned reference level sitting a fraction of a metre away
- * from the real level it shadows does not.
+ * Real-world IFC/Revit models sometimes define a storey at a wildly
+ * different elevation from everything else — a site/sea-level benchmark
+ * unrelated to any actual floor. `createFromIfcStoreys` has no way to know
+ * the difference; it turns every `IfcBuildingStorey` into a floor plan
+ * candidate regardless. This checks each candidate elevation against the
+ * model's real geometry (excluding a handful of degenerate/placeholder
+ * items — a site boundary, a project-wide proxy — whose bounding box spans
+ * far more than any real building element) and drops elevations with
+ * nothing anywhere near them.
+ *
+ * This deliberately does not try to distinguish "leftover default Revit
+ * levels sitting a fraction of a metre from a real one" (e.g. this app also
+ * serves a model with an unused "Level 3" a few centimetres below its real
+ * "Ground Floor Level") from genuine floors — walls span floor-to-ceiling
+ * continuously, so any elevation between a real floor and a real roof
+ * reads as "occupied" regardless, and restricting the check to thin/flat
+ * elements to work around that turned out to just as easily exclude a
+ * genuine sloped roof. Getting that distinction right would need the
+ * model's real IFC spatial containment data, which isn't reliably present
+ * in every converted file this app serves (`FragmentsModel.
+ * getSpatialStructure()` comes back essentially empty for at least one).
  *
  * Uses `FragmentsManager.getBBoxes()` (metadata-derived, per item) rather
  * than walking the loaded THREE.Mesh tiles: a complex model's tiles stream
@@ -565,7 +573,7 @@ async function getElevationsWithContent(
   runtime: Runtime,
   models: DemoModel[],
   elevations: number[],
-  tolerance = 0.25,
+  tolerance = 0.3,
 ): Promise<Set<number>> {
   const itemMap = await getProjectModelIdMap(runtime, models);
   const rawBoxes = await runtime.fragments.getBBoxes(itemMap);
@@ -573,50 +581,17 @@ async function getElevationsWithContent(
   const heights = rawBoxes.map((box) => box.max.y - box.min.y);
   const sortedHeights = [...heights].sort((a, b) => a - b);
   const medianHeight = sortedHeights[Math.floor(sortedHeights.length / 2)] || 1;
-  // A handful of items in real-world exports carry a degenerate/placeholder
-  // bounding box (a site boundary, a project-wide proxy) spanning far more
-  // than any real building element. Exclude anything absurdly tall compared
-  // to the *typical* item in this model — self-calibrating per model.
   const maxReasonableHeight = Math.max(medianHeight * 20, 5);
-
-  // Only thin, roughly-horizontal elements (slabs, floors, roofs, ceilings)
-  // are useful evidence a level is real: walls and other tall elements span
-  // floor-to-ceiling continuously, so checking against *all* geometry makes
-  // every elevation between the real floor and the real roof look
-  // "occupied" — including a leftover level sitting a fraction of a metre
-  // away from the real one it shadows, which is exactly the case this is
-  // meant to catch.
-  const flatThreshold = Math.min(0.4, medianHeight * 0.5);
-  const flatBoxes = rawBoxes.filter((box) => {
-    const height = box.max.y - box.min.y;
-    return height > 0 && height <= flatThreshold && height <= maxReasonableHeight;
-  });
-  console.log(
-    "[storeys] medianHeight",
-    medianHeight,
-    "flatThreshold",
-    flatThreshold,
-    "flatBoxes",
-    flatBoxes.length,
-    "of",
-    rawBoxes.length,
+  const boxes = rawBoxes.filter(
+    (box) => box.max.y - box.min.y <= maxReasonableHeight,
   );
-  if (flatBoxes.length) {
-    console.log(
-      "[storeys] flat box Y centers",
-      flatBoxes
-        .map((b) => Number(((b.min.y + b.max.y) / 2).toFixed(3)))
-        .sort((a, b) => a - b),
-    );
-  }
 
   const withContent = new Set<number>();
   for (const elevation of elevations) {
-    const hasNearbyGeometry = flatBoxes.some(
+    const hasNearbyGeometry = boxes.some(
       (box) =>
         box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
     );
-    console.log("[storeys] elevation", elevation, "hasContent", hasNearbyGeometry);
     if (hasNearbyGeometry) withContent.add(elevation);
   }
 
