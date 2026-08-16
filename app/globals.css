@@ -895,7 +895,15 @@ button.project-button:hover:not(:disabled) {
   display: inline-flex;
   min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 auto;
+  background: var(--border);
 }
 
 .viewer-toolbar-title {

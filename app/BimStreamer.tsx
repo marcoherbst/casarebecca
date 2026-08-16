@@ -3,13 +3,20 @@
 import {
   Box,
   Building2,
+  Eye,
+  EyeOff,
+  Focus,
   Footprints,
   GitBranch,
   Home,
+  LandPlot,
   Layers3,
   ListTree,
   LoaderCircle,
   Orbit,
+  RotateCcw,
+  Ruler,
+  Scan,
   Scissors,
   Settings,
   SquareStack,
@@ -29,6 +36,7 @@ import type {
   Views,
   World,
 } from "@thatopen/components";
+import type { AreaMeasurement, LengthMeasurement } from "@thatopen/components-front";
 import type { FragmentsModel, ItemData, RaycastResult } from "@thatopen/fragments";
 // Resolved to a same-origin build asset URL by Vite (see the `?url` suffix),
 // so the fragments worker no longer needs a network round trip to
@@ -57,6 +65,7 @@ type ProjectId = "demo" | (typeof PROTECTED_MODEL_CATALOG)[number]["id"];
 type DashboardSection = "application-settings" | "home" | "viewer";
 type ViewMode = "2d" | "3d";
 type NavigationMode = "Orbit" | "FirstPerson";
+type ActiveTool = "none" | "section" | "length" | "area";
 type HistoryUpdateMode = "push" | "replace";
 type ViewCatalogGroup = "Floor Plans" | "Elevations";
 
@@ -115,11 +124,14 @@ type Runtime = {
   categoryTreeBuildKey: string | null;
   categoryTreeBuildPromise: Promise<CategoryTreeEntry[]> | null;
   categoryTreeModelsKey: string | null;
+  area: AreaMeasurement;
   clipper: Clipper;
   components: { dispose: () => void; get: <T>(component: unknown) => T };
   drawings: Map<string, TechnicalDrawing>;
   fragments: FragmentsManager;
+  hiddenKeys: Set<string>;
   interaction: InteractionState;
+  length: LengthMeasurement;
   viewCatalog: ViewCatalogEntry[];
   viewCatalogBuildKey: string | null;
   viewCatalogBuildPromise: Promise<ViewCatalogEntry[]> | null;
@@ -674,7 +686,15 @@ async function fitCameraToObject(
   object: THREE.Object3D,
   offset = 1.1,
 ) {
-  const box = new runtime.THREE.Box3().setFromObject(object);
+  await fitCameraToBox(
+    runtime,
+    new runtime.THREE.Box3().setFromObject(object),
+    offset,
+  );
+}
+
+/** Shared core behind {@link fitCameraToObject} — see its docstring above. */
+async function fitCameraToBox(runtime: Runtime, box: THREE.Box3, offset = 1.1) {
   if (box.isEmpty()) return;
 
   const size = box.getSize(new runtime.THREE.Vector3());
@@ -764,12 +784,74 @@ function buildHiddenStyle(runtime: Runtime) {
   };
 }
 
+/**
+ * Translucent "ghost" style for X-ray mode — same mechanism as
+ * {@link buildHiddenStyle}, but partially visible instead of fully invisible,
+ * so the whole building reads as a see-through shell.
+ */
+function buildGhostStyle(runtime: Runtime) {
+  return {
+    color: new runtime.THREE.Color("#8a8f98"),
+    opacity: 0.18,
+    renderedFaces: runtime.FRAGS.RenderedFaces.TWO,
+    transparent: true,
+  };
+}
+
 function raycastKey(result: RaycastResult) {
   return `${result.fragments.modelId}:${result.localId}`;
 }
 
 function raycastMap(result: RaycastResult): ModelIdMap {
   return { [result.fragments.modelId]: new Set([result.localId]) };
+}
+
+function keysFromModelIdMap(map: ModelIdMap): string[] {
+  const keys: string[] = [];
+  for (const [modelId, ids] of Object.entries(map)) {
+    for (const id of ids) keys.push(`${modelId}:${id}`);
+  }
+  return keys;
+}
+
+function markHidden(runtime: Runtime, map: ModelIdMap) {
+  for (const key of keysFromModelIdMap(map)) runtime.hiddenKeys.add(key);
+}
+
+/**
+ * Hides every currently-loaded item except `keepMap` — the shared primitive
+ * behind both the category tree's per-category "Isolate" button and the
+ * toolbar's "Isolate selected" action. Marks the hidden items in
+ * `runtime.hiddenKeys` so a later hover/select doesn't re-highlight (and so
+ * visually un-hide) them — see {@link handleCanvasHover}/{@link handleCanvasSelect}.
+ */
+async function isolateModelIdMap(
+  runtime: Runtime,
+  models: DemoModel[],
+  keepMap: ModelIdMap,
+) {
+  const allMap = await getProjectModelIdMap(runtime, models);
+  const toHide: ModelIdMap = {};
+  for (const [modelId, ids] of Object.entries(allMap)) {
+    const keepIds = keepMap[modelId];
+    const remaining = keepIds ? [...ids].filter((id) => !keepIds.has(id)) : [...ids];
+    if (remaining.length) toHide[modelId] = new Set(remaining);
+  }
+
+  await runtime.fragments.highlight(buildHiddenStyle(runtime), toHide);
+  await runtime.fragments.resetHighlight(keepMap);
+  markHidden(runtime, toHide);
+  runtime.fragments.core.update(true);
+}
+
+/** Fits the camera to the bounding box of an arbitrary selection map. */
+async function focusOnMap(runtime: Runtime, map: ModelIdMap) {
+  const boxes = await runtime.fragments.getBBoxes(map);
+  if (!boxes.length) return;
+  const box = boxes.reduce((acc, next) => acc.union(next), boxes[0].clone());
+  // A single small item needs more breathing room than the whole-model fit's
+  // default offset, or it fills the frame edge-to-edge with no context.
+  await fitCameraToBox(runtime, box, 1.6);
 }
 
 async function raycastAtEvent(
@@ -815,7 +897,13 @@ async function handleCanvasHover(
 
   interaction.hoverBusy = true;
   try {
-    const result = await raycastAtEvent(runtime, event, canvas);
+    let result = await raycastAtEvent(runtime, event, canvas);
+    if (result && runtime.hiddenKeys.has(raycastKey(result))) {
+      // Hidden geometry stays raycastable (buildHiddenStyle only sets
+      // opacity: 0), so without this it would visually un-hide itself the
+      // moment the cursor passes over it.
+      result = undefined;
+    }
     const key = result ? raycastKey(result) : null;
 
     if (key === interaction.hoveredKey) return;
@@ -879,7 +967,10 @@ async function handleCanvasSelect(
   onSelect: (element: SelectedElement | null) => void,
 ) {
   const { interaction } = runtime;
-  const result = await raycastAtEvent(runtime, event, canvas);
+  let result = await raycastAtEvent(runtime, event, canvas);
+  if (result && runtime.hiddenKeys.has(raycastKey(result))) {
+    result = undefined;
+  }
 
   if (interaction.hoveredMap && interaction.hoveredKey !== interaction.selectedKey) {
     await runtime.fragments.resetHighlight(interaction.hoveredMap);
@@ -1022,8 +1113,9 @@ export default function BimStreamer({
   const [categoryTree, setCategoryTree] = useState<CategoryTreeEntry[]>([]);
   const [navigationMode, setNavigationModeState] =
     useState<NavigationMode>("Orbit");
-  const [isSectionMode, setIsSectionMode] = useState(false);
+  const [activeTool, setActiveTool] = useState<ActiveTool>("none");
   const [sectionCount, setSectionCount] = useState(0);
+  const [isXrayMode, setIsXrayMode] = useState(false);
   const is2DView = activeViewId !== null;
 
   const resolvedProjects = useMemo(
@@ -1227,10 +1319,11 @@ export default function BimStreamer({
       if (!viewerRef.current) return;
 
       try {
-        const [OBC, THREE, FRAGS] = await Promise.all([
+        const [OBC, THREE, FRAGS, OBF] = await Promise.all([
           import("@thatopen/components"),
           import("three"),
           import("@thatopen/fragments"),
+          import("@thatopen/components-front"),
         ]);
         const components = new OBC.Components();
         const worlds = components.get(OBC.Worlds);
@@ -1243,7 +1336,11 @@ export default function BimStreamer({
         world.scene = new OBC.SimpleScene(components);
         world.scene.setup();
         world.scene.three.background = new THREE.Color("#e4e9e2");
-        world.renderer = new OBC.SimpleRenderer(components, viewerRef.current, {
+        // RendererWith2D (not the plain SimpleRenderer) — a drop-in subclass
+        // that additionally composites a CSS2DRenderer overlay, which the
+        // length/area measurement tools below need to render their dimension
+        // value labels.
+        world.renderer = new OBF.RendererWith2D(components, viewerRef.current, {
           antialias: true,
           alpha: false,
         });
@@ -1300,10 +1397,18 @@ export default function BimStreamer({
         const clipper = components.get<Clipper>(OBC.Clipper);
         clipper.enabled = false;
 
+        const length = components.get<LengthMeasurement>(OBF.LengthMeasurement);
+        length.world = world;
+        length.enabled = false;
+        const area = components.get<AreaMeasurement>(OBF.AreaMeasurement);
+        area.world = world;
+        area.enabled = false;
+
         runtimeRef.current = {
           FRAGS,
           OBC,
           THREE,
+          area,
           categoryTree: [],
           categoryTreeBuildKey: null,
           categoryTreeBuildPromise: null,
@@ -1312,6 +1417,7 @@ export default function BimStreamer({
           components,
           drawings: new Map(),
           fragments,
+          hiddenKeys: new Set(),
           interaction: {
             hoverBusy: false,
             hoveredKey: null,
@@ -1319,6 +1425,7 @@ export default function BimStreamer({
             selectedKey: null,
             selectedMap: null,
           },
+          length,
           viewCatalog: [],
           viewCatalogBuildKey: null,
           viewCatalogBuildPromise: null,
@@ -1380,14 +1487,22 @@ export default function BimStreamer({
     setNavigationModeState(mode);
   }, []);
 
-  const toggleSectionMode = useCallback(() => {
+  // Section/length/area are mutually exclusive canvas interaction modes —
+  // switching to one disables the others' pointer handling and Createable
+  // instance in one place, rather than juggling independent booleans.
+  const setActiveToolMode = useCallback((tool: ActiveTool) => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
 
-    const next = !runtime.clipper.enabled;
-    runtime.clipper.enabled = next;
-    setIsSectionMode(next);
+    runtime.clipper.enabled = tool === "section";
+    runtime.length.enabled = tool === "length";
+    runtime.area.enabled = tool === "area";
+    setActiveTool(tool);
   }, []);
+
+  const toggleSectionMode = useCallback(() => {
+    setActiveToolMode(activeTool === "section" ? "none" : "section");
+  }, [activeTool, setActiveToolMode]);
 
   const clearSections = useCallback(() => {
     const runtime = runtimeRef.current;
@@ -1531,6 +1646,78 @@ export default function BimStreamer({
     setCategoryTree(runtime.categoryTree);
     runtime.fragments.core.update(true);
   }, []);
+
+  const focusOnSelection = useCallback(() => {
+    const runtime = runtimeRef.current;
+    const map = runtime?.interaction.selectedMap;
+    if (!runtime || !map) return;
+    void focusOnMap(runtime, map);
+  }, []);
+
+  const hideSelected = useCallback(() => {
+    const runtime = runtimeRef.current;
+    const map = runtime?.interaction.selectedMap;
+    if (!runtime || !map) return;
+    void (async () => {
+      await runtime.fragments.highlight(buildHiddenStyle(runtime), map);
+      markHidden(runtime, map);
+      runtime.fragments.core.update(true);
+      clearSelection();
+    })();
+  }, [clearSelection]);
+
+  const isolateSelected = useCallback(() => {
+    const runtime = runtimeRef.current;
+    const map = runtime?.interaction.selectedMap;
+    if (!runtime || !map) return;
+    void isolateModelIdMap(runtime, currentModels, map);
+  }, [currentModels]);
+
+  const toggleXray = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    void (async () => {
+      const allMap = await getProjectModelIdMap(runtime, currentModels);
+      if (isXrayMode) {
+        await runtime.fragments.resetHighlight(allMap);
+      } else {
+        await runtime.fragments.highlight(buildGhostStyle(runtime), allMap);
+      }
+      runtime.fragments.core.update(true);
+      setIsXrayMode(!isXrayMode);
+    })();
+  }, [currentModels, isXrayMode]);
+
+  // A deliberate full reset rather than tracking + reconciling per-item
+  // hide/isolate/x-ray state against the category tree's own per-category
+  // visibility — see isolateModelIdMap's docstring for why that would be a
+  // second source of truth to keep in sync.
+  const resetView = useCallback(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+
+    clearSelection();
+    void showAllCategories();
+    void (async () => {
+      const allMap = await getProjectModelIdMap(runtime, currentModels);
+      await runtime.fragments.resetHighlight(allMap);
+      runtime.hiddenKeys.clear();
+      runtime.fragments.core.update(true);
+    })();
+
+    setIsXrayMode(false);
+    setActiveToolMode("none");
+    setNavigationMode("Orbit");
+
+    const bounds = getProjectModelBounds(runtime, currentModels);
+    if (bounds) void fitCameraToBox(runtime, bounds, 1.25);
+  }, [
+    clearSelection,
+    currentModels,
+    setActiveToolMode,
+    setNavigationMode,
+    showAllCategories,
+  ]);
 
   const selectView = useCallback(
     async (
@@ -1918,7 +2105,7 @@ export default function BimStreamer({
 
   useEffect(() => {
     const runtime = runtimeRef.current;
-    if (!runtime || !isReady || is2DView || isSectionMode) return;
+    if (!runtime || !isReady || is2DView || activeTool !== "none") return;
 
     const canvas = runtime.world.renderer.three.domElement;
 
@@ -1944,11 +2131,11 @@ export default function BimStreamer({
       canvas.style.cursor = "default";
       void clearHover(runtime);
     };
-  }, [is2DView, isReady, isSectionMode]);
+  }, [activeTool, is2DView, isReady]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
-    if (!runtime || !isReady || is2DView || !isSectionMode) return;
+    if (!runtime || !isReady || is2DView || activeTool !== "section") return;
 
     const canvas = runtime.world.renderer.three.domElement;
     const { clipper } = runtime;
@@ -1972,7 +2159,51 @@ export default function BimStreamer({
       canvas.removeEventListener("dblclick", onDoubleClick);
       canvas.style.cursor = "default";
     };
-  }, [is2DView, isReady, isSectionMode]);
+  }, [activeTool, is2DView, isReady]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !isReady ||
+      is2DView ||
+      (activeTool !== "length" && activeTool !== "area")
+    ) {
+      return;
+    }
+
+    const instance = activeTool === "length" ? runtime.length : runtime.area;
+    const canvas = runtime.world.renderer.three.domElement;
+
+    const onClick = () => {
+      void instance.create();
+    };
+    // Length auto-completes once two points are placed, but Area (a
+    // variable-length polygon) needs an explicit "finish" signal — same
+    // double-click-to-commit convention as the Clipper section-plane tool.
+    const onDoubleClick = () => {
+      instance.endCreation();
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        instance.delete();
+      } else if (event.key === "Enter") {
+        instance.endCreation();
+      }
+    };
+
+    canvas.addEventListener("click", onClick);
+    canvas.addEventListener("dblclick", onDoubleClick);
+    window.addEventListener("keydown", onKeydown);
+    canvas.style.cursor = "crosshair";
+
+    return () => {
+      canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("dblclick", onDoubleClick);
+      window.removeEventListener("keydown", onKeydown);
+      canvas.style.cursor = "default";
+    };
+  }, [activeTool, is2DView, isReady]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2259,11 +2490,11 @@ export default function BimStreamer({
                 {!is2DView ? (
                   <button
                     aria-label={
-                      isSectionMode
+                      activeTool === "section"
                         ? "Stop adding section planes"
                         : "Add section plane (double-click the model)"
                     }
-                    aria-pressed={isSectionMode}
+                    aria-pressed={activeTool === "section"}
                     className="nav-mode-toggle"
                     disabled={!isReady}
                     onClick={toggleSectionMode}
@@ -2283,6 +2514,102 @@ export default function BimStreamer({
                   >
                     Clear sections ({sectionCount})
                   </button>
+                ) : null}
+                {!is2DView ? (
+                  <>
+                    <span aria-hidden="true" className="toolbar-divider" />
+                    <button
+                      aria-label="Focus on selection"
+                      className="nav-mode-toggle"
+                      disabled={!isReady || !selectedElement}
+                      onClick={focusOnSelection}
+                      title="Focus"
+                      type="button"
+                    >
+                      <Focus className="icon" aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label="Hide selected"
+                      className="nav-mode-toggle"
+                      disabled={!isReady || !selectedElement}
+                      onClick={hideSelected}
+                      title="Hide selected"
+                      type="button"
+                    >
+                      <EyeOff className="icon" aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label="Isolate selected"
+                      className="nav-mode-toggle"
+                      disabled={!isReady || !selectedElement}
+                      onClick={isolateSelected}
+                      title="Isolate selected"
+                      type="button"
+                    >
+                      <Eye className="icon" aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label={
+                        isXrayMode ? "Turn off x-ray mode" : "Turn on x-ray mode"
+                      }
+                      aria-pressed={isXrayMode}
+                      className="nav-mode-toggle"
+                      disabled={!isReady}
+                      onClick={toggleXray}
+                      title="X-ray"
+                      type="button"
+                    >
+                      <Scan className="icon" aria-hidden="true" />
+                    </button>
+                    <span aria-hidden="true" className="toolbar-divider" />
+                    <button
+                      aria-label={
+                        activeTool === "length"
+                          ? "Stop length measurement"
+                          : "Measure length"
+                      }
+                      aria-pressed={activeTool === "length"}
+                      className="nav-mode-toggle"
+                      disabled={!isReady}
+                      onClick={() =>
+                        setActiveToolMode(
+                          activeTool === "length" ? "none" : "length",
+                        )
+                      }
+                      title="Length"
+                      type="button"
+                    >
+                      <Ruler className="icon" aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label={
+                        activeTool === "area"
+                          ? "Stop area measurement"
+                          : "Measure area"
+                      }
+                      aria-pressed={activeTool === "area"}
+                      className="nav-mode-toggle"
+                      disabled={!isReady}
+                      onClick={() =>
+                        setActiveToolMode(activeTool === "area" ? "none" : "area")
+                      }
+                      title="Area"
+                      type="button"
+                    >
+                      <LandPlot className="icon" aria-hidden="true" />
+                    </button>
+                    <span aria-hidden="true" className="toolbar-divider" />
+                    <button
+                      aria-label="Reset view"
+                      className="nav-mode-toggle"
+                      disabled={!isReady}
+                      onClick={resetView}
+                      title="Reset view"
+                      type="button"
+                    >
+                      <RotateCcw className="icon" aria-hidden="true" />
+                    </button>
+                  </>
                 ) : null}
                 {canShowProjectSettings ? (
                   <button
