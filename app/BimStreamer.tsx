@@ -565,42 +565,54 @@ async function getElevationsWithContent(
   runtime: Runtime,
   models: DemoModel[],
   elevations: number[],
-  tolerance = 0.3,
+  tolerance = 0.25,
 ): Promise<Set<number>> {
   const itemMap = await getProjectModelIdMap(runtime, models);
   const rawBoxes = await runtime.fragments.getBBoxes(itemMap);
 
+  const heights = rawBoxes.map((box) => box.max.y - box.min.y);
+  const sortedHeights = [...heights].sort((a, b) => a - b);
+  const medianHeight = sortedHeights[Math.floor(sortedHeights.length / 2)] || 1;
   // A handful of items in real-world exports carry a degenerate/placeholder
   // bounding box (a site boundary, a project-wide proxy) spanning far more
-  // than any real building element — worse, spanning enough of the Y axis
-  // that every candidate elevation reads as "inside" it, defeating this
-  // check entirely. Exclude anything absurdly tall compared to the *typical*
-  // item in this model — self-calibrating per model, unlike a fixed number
-  // or (the bug this replaced) a threshold derived from the candidate
-  // elevations themselves, which is circular when one of those candidates
-  // (e.g. a distant site datum) is itself the outlier inflating the spread.
-  const heights = rawBoxes
-    .map((box) => box.max.y - box.min.y)
-    .sort((a, b) => a - b);
-  const medianHeight = heights[Math.floor(heights.length / 2)] || 1;
+  // than any real building element. Exclude anything absurdly tall compared
+  // to the *typical* item in this model — self-calibrating per model.
   const maxReasonableHeight = Math.max(medianHeight * 20, 5);
-  const boxes = rawBoxes.filter(
-    (box) => box.max.y - box.min.y <= maxReasonableHeight,
-  );
+
+  // Only thin, roughly-horizontal elements (slabs, floors, roofs, ceilings)
+  // are useful evidence a level is real: walls and other tall elements span
+  // floor-to-ceiling continuously, so checking against *all* geometry makes
+  // every elevation between the real floor and the real roof look
+  // "occupied" — including a leftover level sitting a fraction of a metre
+  // away from the real one it shadows, which is exactly the case this is
+  // meant to catch.
+  const flatThreshold = Math.min(0.4, medianHeight * 0.5);
+  const flatBoxes = rawBoxes.filter((box) => {
+    const height = box.max.y - box.min.y;
+    return height > 0 && height <= flatThreshold && height <= maxReasonableHeight;
+  });
   console.log(
     "[storeys] medianHeight",
     medianHeight,
-    "maxReasonableHeight",
-    maxReasonableHeight,
-    "rawBoxes",
+    "flatThreshold",
+    flatThreshold,
+    "flatBoxes",
+    flatBoxes.length,
+    "of",
     rawBoxes.length,
-    "keptBoxes",
-    boxes.length,
   );
+  if (flatBoxes.length) {
+    console.log(
+      "[storeys] flat box Y centers",
+      flatBoxes
+        .map((b) => Number(((b.min.y + b.max.y) / 2).toFixed(3)))
+        .sort((a, b) => a - b),
+    );
+  }
 
   const withContent = new Set<number>();
   for (const elevation of elevations) {
-    const hasNearbyGeometry = boxes.some(
+    const hasNearbyGeometry = flatBoxes.some(
       (box) =>
         box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
     );
