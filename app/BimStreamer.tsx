@@ -568,43 +568,28 @@ async function getElevationsWithContent(
   tolerance = 0.3,
 ): Promise<Set<number>> {
   const itemMap = await getProjectModelIdMap(runtime, models);
-  console.log(
-    "[storeys] itemMap sizes",
-    Object.fromEntries(
-      Object.entries(itemMap).map(([id, ids]) => [id, ids.size]),
-    ),
-  );
-  const boxes = await runtime.fragments.getBBoxes(itemMap);
-  console.log("[storeys] boxes.length", boxes.length);
-  if (boxes.length) {
-    const sample = boxes.slice(0, 3).map((b) => ({
-      min: b.min.toArray(),
-      max: b.max.toArray(),
-    }));
-    console.log("[storeys] sample boxes", JSON.stringify(sample));
-  }
-  const withContent = new Set<number>();
+  const rawBoxes = await runtime.fragments.getBBoxes(itemMap);
 
+  // A handful of items in real-world exports carry a degenerate/placeholder
+  // bounding box (a site boundary, a project-wide proxy) spanning far more
+  // than any real building element — worse, spanning enough of the Y axis
+  // that every candidate elevation reads as "inside" it, defeating this
+  // check entirely. Exclude anything absurdly tall compared to the spread
+  // of candidate elevations themselves before checking proximity.
+  const elevationSpread =
+    Math.max(...elevations) - Math.min(...elevations) || 1;
+  const maxReasonableHeight = Math.max(elevationSpread * 2, 10);
+  const boxes = rawBoxes.filter(
+    (box) => box.max.y - box.min.y <= maxReasonableHeight,
+  );
+
+  const withContent = new Set<number>();
   for (const elevation of elevations) {
-    let minDist = Infinity;
-    for (const box of boxes) {
-      const dist =
-        box.min.y > elevation
-          ? box.min.y - elevation
-          : box.max.y < elevation
-            ? elevation - box.max.y
-            : 0;
-      if (dist < minDist) minDist = dist;
-    }
-    console.log(
-      "[storeys] elevation",
-      elevation,
-      "minDist",
-      minDist,
-      "hasContent",
-      minDist <= tolerance,
+    const hasNearbyGeometry = boxes.some(
+      (box) =>
+        box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
     );
-    if (minDist <= tolerance) withContent.add(elevation);
+    if (hasNearbyGeometry) withContent.add(elevation);
   }
 
   return withContent;
