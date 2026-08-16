@@ -650,21 +650,6 @@ async function getProjectableModelIdMap(
   const sorted = [...sizes].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] || 1;
   const maxReasonableSize = Math.max(median * 20, 5);
-  // debug: outlier sanity check
-  const excludedCount = sizes.filter((size) => size > maxReasonableSize).length;
-  console.log(
-    "[debug] getProjectableModelIdMap",
-    "total",
-    sizes.length,
-    "median",
-    median,
-    "maxReasonable",
-    maxReasonableSize,
-    "excluded",
-    excludedCount,
-    "top10",
-    [...sorted].reverse().slice(0, 10),
-  );
 
   const filtered: ModelIdMap = {};
   entries.forEach((entry, index) => {
@@ -1044,12 +1029,10 @@ async function ensureDrawingForView(
       );
     }
   } else {
-    const projectableItemMap = await getProjectableModelIdMap(runtime, models);
-    console.time("[debug] addProjectionFromItems");
-    await drawing.addProjectionFromItems(projectableItemMap, {
-      layers: PROJECTION_LAYERS,
-    });
-    console.timeEnd("[debug] addProjectionFromItems");
+    await drawing.addProjectionFromItems(
+      await getProjectableModelIdMap(runtime, models),
+      { layers: PROJECTION_LAYERS },
+    );
 
     if (cacheKey) {
       const layers: CachedLineLayer[] = [];
