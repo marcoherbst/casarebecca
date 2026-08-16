@@ -568,15 +568,43 @@ async function getElevationsWithContent(
   tolerance = 0.3,
 ): Promise<Set<number>> {
   const itemMap = await getProjectModelIdMap(runtime, models);
+  console.log(
+    "[storeys] itemMap sizes",
+    Object.fromEntries(
+      Object.entries(itemMap).map(([id, ids]) => [id, ids.size]),
+    ),
+  );
   const boxes = await runtime.fragments.getBBoxes(itemMap);
+  console.log("[storeys] boxes.length", boxes.length);
+  if (boxes.length) {
+    const sample = boxes.slice(0, 3).map((b) => ({
+      min: b.min.toArray(),
+      max: b.max.toArray(),
+    }));
+    console.log("[storeys] sample boxes", JSON.stringify(sample));
+  }
   const withContent = new Set<number>();
 
   for (const elevation of elevations) {
-    const hasNearbyGeometry = boxes.some(
-      (box) =>
-        box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
+    let minDist = Infinity;
+    for (const box of boxes) {
+      const dist =
+        box.min.y > elevation
+          ? box.min.y - elevation
+          : box.max.y < elevation
+            ? elevation - box.max.y
+            : 0;
+      if (dist < minDist) minDist = dist;
+    }
+    console.log(
+      "[storeys] elevation",
+      elevation,
+      "minDist",
+      minDist,
+      "hasContent",
+      minDist <= tolerance,
     );
-    if (hasNearbyGeometry) withContent.add(elevation);
+    if (minDist <= tolerance) withContent.add(elevation);
   }
 
   return withContent;
