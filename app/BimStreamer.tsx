@@ -574,13 +574,28 @@ async function getElevationsWithContent(
   // bounding box (a site boundary, a project-wide proxy) spanning far more
   // than any real building element — worse, spanning enough of the Y axis
   // that every candidate elevation reads as "inside" it, defeating this
-  // check entirely. Exclude anything absurdly tall compared to the spread
-  // of candidate elevations themselves before checking proximity.
-  const elevationSpread =
-    Math.max(...elevations) - Math.min(...elevations) || 1;
-  const maxReasonableHeight = Math.max(elevationSpread * 2, 10);
+  // check entirely. Exclude anything absurdly tall compared to the *typical*
+  // item in this model — self-calibrating per model, unlike a fixed number
+  // or (the bug this replaced) a threshold derived from the candidate
+  // elevations themselves, which is circular when one of those candidates
+  // (e.g. a distant site datum) is itself the outlier inflating the spread.
+  const heights = rawBoxes
+    .map((box) => box.max.y - box.min.y)
+    .sort((a, b) => a - b);
+  const medianHeight = heights[Math.floor(heights.length / 2)] || 1;
+  const maxReasonableHeight = Math.max(medianHeight * 20, 5);
   const boxes = rawBoxes.filter(
     (box) => box.max.y - box.min.y <= maxReasonableHeight,
+  );
+  console.log(
+    "[storeys] medianHeight",
+    medianHeight,
+    "maxReasonableHeight",
+    maxReasonableHeight,
+    "rawBoxes",
+    rawBoxes.length,
+    "keptBoxes",
+    boxes.length,
   );
 
   const withContent = new Set<number>();
@@ -589,6 +604,7 @@ async function getElevationsWithContent(
       (box) =>
         box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance,
     );
+    console.log("[storeys] elevation", elevation, "hasContent", hasNearbyGeometry);
     if (hasNearbyGeometry) withContent.add(elevation);
   }
 
