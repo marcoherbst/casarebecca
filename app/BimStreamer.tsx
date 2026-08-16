@@ -986,10 +986,31 @@ async function ensureDrawingForView(
       );
     }
   } else {
-    await drawing.addProjectionFromItems(
-      await getProjectModelIdMap(runtime, models),
-      { layers: PROJECTION_LAYERS },
-    );
+    const itemMap = await getProjectModelIdMap(runtime, models);
+    // debug: bbox size sanity check
+    try {
+      const boxes = await runtime.fragments.getBBoxes(itemMap);
+      const sizes = boxes.map((box) => {
+        const size = box.getSize(new runtime.THREE.Vector3());
+        return size.length();
+      });
+      const sorted = [...sizes].sort((a, b) => b - a);
+      console.log(
+        "[debug] item count",
+        sizes.length,
+        "top 5 bbox diagonals",
+        sorted.slice(0, 5),
+        "median",
+        sorted[Math.floor(sorted.length / 2)],
+      );
+    } catch (error) {
+      console.log("[debug] bbox check failed", error);
+    }
+    console.time("[debug] addProjectionFromItems");
+    await drawing.addProjectionFromItems(itemMap, {
+      layers: PROJECTION_LAYERS,
+    });
+    console.timeEnd("[debug] addProjectionFromItems");
 
     if (cacheKey) {
       const layers: CachedLineLayer[] = [];
