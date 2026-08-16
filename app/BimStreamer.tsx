@@ -37,12 +37,7 @@ import type {
   World,
 } from "@thatopen/components";
 import type { AreaMeasurement, LengthMeasurement } from "@thatopen/components-front";
-import type {
-  FragmentsModel,
-  ItemData,
-  RaycastResult,
-  SpatialTreeItem,
-} from "@thatopen/fragments";
+import type { FragmentsModel, ItemData, RaycastResult } from "@thatopen/fragments";
 // Resolved to a same-origin build asset URL by Vite (see the `?url` suffix),
 // so the fragments worker no longer needs a network round trip to
 // unpkg.com on every session — OBC.FragmentsManager.getWorker() fetches the
@@ -547,73 +542,38 @@ function resetViewCatalog(runtime: Runtime) {
 
 /**
  * Real-world IFC/Revit models routinely define more storeys than a building
- * actually has floors at — reference datums (a site benchmark, a roof or
- * parapet coordination plane) that the architect never assigned any element
- * to. `createFromIfcStoreys` has no way to know the difference; it turns
- * every `IfcBuildingStorey` into a floor plan candidate regardless. This
- * checks each storey's real IFC spatial containment (via
- * `FragmentsModel.getSpatialStructure()`) and returns the set of storey
- * names that actually contain at least one element, so empty reference
- * levels can be filtered out of the floor plan list.
+ * actually has floors at — most often leftover default levels a Revit
+ * project template ships with (e.g. "Level 3"/"Level 4") that the architect
+ * never deleted after adding their own named levels, plus the odd site
+ * benchmark ("Sea Level"). `createFromIfcStoreys` has no way to know the
+ * difference; it turns every `IfcBuildingStorey` into a floor plan candidate
+ * regardless. `FragmentsModel.getSpatialStructure()` would be the correct
+ * signal (real IFC spatial containment), but it comes back essentially
+ * empty for at least one real converted model this app serves — so this
+ * instead checks, per candidate elevation, whether any actual geometry sits
+ * close to it. A real floor/roof level has a slab or structure right at its
+ * elevation; an orphaned reference level sitting a fraction of a metre away
+ * from the real level it shadows does not.
  */
-async function getStoreyNamesWithContent(
+function getElevationsWithContent(
   runtime: Runtime,
   models: DemoModel[],
-): Promise<Set<string>> {
-  const namesWithContent = new Set<string>();
+  elevations: number[],
+  tolerance = 0.3,
+): Set<number> {
+  const meshes = collectProjectMeshes(runtime, models);
+  const withContent = new Set<number>();
+  const box = new runtime.THREE.Box3();
 
-  for (const model of getLoadedProjectModels(runtime, models)) {
-    const tree = await model.getSpatialStructure();
-    console.log("[storeys] tree root", tree.category, tree.children?.length);
-
-    const storeyNodes: SpatialTreeItem[] = [];
-    const collectStoreys = (node: SpatialTreeItem) => {
-      if (/BUILDINGSTOREY/.test(node.category ?? "")) {
-        storeyNodes.push(node);
-      }
-      for (const child of node.children ?? []) collectStoreys(child);
-    };
-    collectStoreys(tree);
-    console.log("[storeys] found storey nodes", storeyNodes.length);
-    if (!storeyNodes.length) continue;
-
-    const countDescendants = (node: SpatialTreeItem): number =>
-      (node.children ?? []).reduce(
-        (sum, child) => sum + 1 + countDescendants(child),
-        0,
-      );
-
-    const storeyLocalIds = storeyNodes
-      .map((node) => node.localId)
-      .filter((id): id is number => id !== null);
-    const storeysData = await model.getItemsData(storeyLocalIds);
-
-    storeyNodes.forEach((node, index) => {
-      const nameAttribute = storeysData[index]?.Name;
-      const count = countDescendants(node);
-      console.log(
-        "[storeys] storey",
-        JSON.stringify(nameAttribute),
-        "descendants",
-        count,
-        "children",
-        node.children?.length,
-      );
-      if (
-        !nameAttribute ||
-        Array.isArray(nameAttribute) ||
-        !("value" in nameAttribute)
-      ) {
-        return;
-      }
-      if (count > 0) {
-        namesWithContent.add(String(nameAttribute.value));
-      }
+  for (const elevation of elevations) {
+    const hasNearbyGeometry = meshes.some((mesh) => {
+      box.setFromObject(mesh);
+      return box.min.y <= elevation + tolerance && box.max.y >= elevation - tolerance;
     });
+    if (hasNearbyGeometry) withContent.add(elevation);
   }
 
-  console.log("[storeys] namesWithContent", [...namesWithContent]);
-  return namesWithContent;
+  return withContent;
 }
 
 /**
@@ -640,20 +600,11 @@ async function buildViewCatalog(
     `^(?:${loadedModelIds.map(escapeRegExp).join("|")})$`,
   );
   const bounds = getProjectModelBounds(runtime, models);
-  console.log(
-    "[storeys] model Y bounds",
-    bounds?.min.y,
-    "to",
-    bounds?.max.y,
-  );
   const catalog: ViewCatalogEntry[] = [];
 
   const storeyViews = await views.createFromIfcStoreys({
     modelIds: [modelIdPattern],
   });
-  for (const view of storeyViews) {
-    console.log("[storeys] view", view.id, "elevation", view.plane.constant);
-  }
 
   // Multi-discipline projects (e.g. architecture + structure) commonly reuse
   // the same storey names, so createFromIfcStoreys can hand back several
@@ -669,27 +620,22 @@ async function buildViewCatalog(
     uniqueStoreyViews.set(view.id, view);
   }
 
-  // Drop storeys that are pure reference datums (a site benchmark, a roof
-  // coordination plane) with no elements actually assigned to them in the
-  // source IFC — real for the model, but not a meaningful floor plan. Falls
-  // back to the unfiltered set if the check somehow finds nothing with
-  // content (e.g. missing spatial-structure data) rather than showing zero
-  // floor plans.
-  const storeysWithContent = await getStoreyNamesWithContent(runtime, models);
-  console.log(
-    "[storeys] uniqueStoreyViews ids",
-    [...uniqueStoreyViews.keys()],
+  // Drop storeys that are pure reference datums (a leftover default Revit
+  // level, a site benchmark) with no geometry actually sitting at their
+  // elevation — real for the model, but not a meaningful floor plan. Falls
+  // back to the unfiltered set if the check finds nothing with content at
+  // all (e.g. models still mid-load) rather than showing zero floor plans.
+  const elevationsWithContent = getElevationsWithContent(
+    runtime,
+    models,
+    [...uniqueStoreyViews.values()].map((view) => view.plane.constant),
   );
   const contentfulStoreyViews = [...uniqueStoreyViews.values()].filter(
-    (view) => storeysWithContent.has(view.id),
-  );
-  console.log(
-    "[storeys] contentfulStoreyViews ids",
-    contentfulStoreyViews.map((v) => v.id),
+    (view) => elevationsWithContent.has(view.plane.constant),
   );
   if (contentfulStoreyViews.length) {
     for (const view of uniqueStoreyViews.values()) {
-      if (!storeysWithContent.has(view.id)) view.dispose();
+      if (!elevationsWithContent.has(view.plane.constant)) view.dispose();
     }
   } else {
     contentfulStoreyViews.push(...uniqueStoreyViews.values());
