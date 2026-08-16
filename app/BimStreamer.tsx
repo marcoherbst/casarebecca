@@ -2301,12 +2301,15 @@ export default function BimStreamer({
       clearSelection();
 
       try {
+        console.log("[debug] selectView start", nextViewId);
         const loadedModelIds = getLoadedModelIds(runtime, currentModels);
         if (!loadedModelIds.length) {
           throw new Error("Load a model before switching to 2D.");
         }
 
+        console.log("[debug] before ensureViewCatalog");
         await ensureViewCatalog(runtime);
+        console.log("[debug] after ensureViewCatalog");
         const view = runtime.views.list.get(nextViewId);
         if (!view) {
           throw new Error("That view is no longer available.");
@@ -2347,15 +2350,18 @@ export default function BimStreamer({
         // Rough initial framing from the source model's bounds, so the
         // camera lands somewhere sane while the drawing is still building.
         const meshes = collectProjectMeshes(runtime, currentModels);
+        console.log("[debug] before camera.fit", meshes.length);
         if (meshes.length) {
           await runtime.world.camera.fit(meshes, 1.25);
         }
+        console.log("[debug] before ensureDrawingForView");
 
         const drawing = await ensureDrawingForView(
           runtime,
           currentModels,
           view,
         );
+        console.log("[debug] after ensureDrawingForView");
         setProjectModelsVisible(runtime, currentModels, false);
         drawing.three.visible = true;
         runtime.drawingEditor.activeDrawing = drawing;
